@@ -15,7 +15,6 @@ def simple_sat_program():
     solver = cp_model.CpSolver()
     status = solver.Solve(model)
 
-    # status가 Optimal이거나 Feasible 한 게 있다면
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
         print('x = %i' % solver.Value(x))
         print('y = %i' % solver.Value(y))
