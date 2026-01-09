@@ -1,7 +1,7 @@
 import gurobipy as gp
 from gurobipy import GRB
 
-index = ["호준",4,2,6,"정우"]
+index = ["a",4,2,6,"b"]
 
 md = gp.Model("1")
 
