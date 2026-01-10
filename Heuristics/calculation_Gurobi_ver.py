@@ -20,12 +20,12 @@ def tardiness(seqs):
     md.addConstr(st[seqs[0]] == 0)
 
     # Start + process = End
-    md.addConstrs(st[job] + job.processing_time == et[job] for job in seqs)
+    md.addConstrs(st[job] + job.processing_time <= et[job] for job in seqs)
 
     # Job's end = Next Job's start
-    md.addConstrs(et[seqs[job_sq]] == st[seqs[job_sq + 1]] for job_sq in range(len(seqs) - 1))
+    md.addConstrs(et[seqs[job_sq]] <= st[seqs[job_sq + 1]] for job_sq in range(len(seqs) - 1))
 
-    # Tardiness >= 0 or Tardiness >= (End - Due)
+    # Tardiness == 0 or Tardiness == (End - Due)
     md.addConstrs(et[job] - job.due <= td[job] for job in seqs)
 
     md.setObjective(gp.quicksum(td[job] for job in seqs), GRB.MINIMIZE)
