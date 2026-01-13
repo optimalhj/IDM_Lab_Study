@@ -7,6 +7,10 @@ y = md.IntVar(0, 25, 'y')
 
 md.Add(2 * x + y <= 50)
 
+constraint1 = md.Constraint(-md.Infinity(), 150)
+constraint1.SetCoefficient(x, 4)
+constraint1.SetCoefficient(y, 6)
+
 md.Maximize(5 * x + 3 * y)
 
 status = md.Solve()
