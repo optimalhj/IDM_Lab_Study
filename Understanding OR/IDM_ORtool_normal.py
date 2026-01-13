@@ -5,6 +5,8 @@ md = pywraplp.Solver.CreateSolver('SCIP') # CBC(정수, 이진, 실수), GLOP(�
 x = md.IntVar(0, 20, 'x')
 y = md.IntVar(0, 25, 'y')
 
+md.Add(2 * x + y <= 50)
+
 md.Maximize(5 * x + 3 * y)
 
 status = md.Solve()
