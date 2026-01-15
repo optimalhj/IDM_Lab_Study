@@ -2,7 +2,6 @@
 from environment import HarvesterTankerCorporationEnvironment
 from agent.dispatch.base_agent import BaseDispatchAgent
 from RLAlgo.reinforce import *
-from RLAlgo.dqn import *
 import numpy as np
 
 from toolkit.time import print_with_time

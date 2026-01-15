@@ -8,7 +8,6 @@ import random
 from torch.utils.data import Dataset
 
 from utils.Grid import Grid
-from config import *
 from regions import *
 
 

@@ -3,7 +3,6 @@ from Dataset import *
 from regions import *
 from utils.CompleteRegion import *
 from parameter import *
-from SemiMarkov import *
 
 
 from toolkit.state import * 

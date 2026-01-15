@@ -5,7 +5,6 @@ import numpy as np
 from toolkit.time import *
 
 from network.harvester_attention_rev import HarvesterAttention
-from network.JDRL_network import *
 
 
 class REINFORCE2:
