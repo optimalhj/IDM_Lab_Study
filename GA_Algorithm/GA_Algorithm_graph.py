@@ -1,8 +1,18 @@
 import numbers
-import time, math
+import time
 import numpy as np
 import matplotlib.pyplot as plt
-from calculation_Gurobi_ver import tardiness
+
+from calculation_tardiness import tardiness
+
+Time = 2
+by = 0.125
+
+plt_type = 1 # [0 : dot graph(scatter) , 1 : line graph(plot) , else -> default 1 convert]
+if plt_type != 1 or plt_type != 0:
+    plt_type = 1
+
+params = {'MUT': 0.5, 'POP_SIZE' : 10, 'NUM_OFFSPRING' : 5}
 
 # Jobs to Class process / "Name" as Attribute and Randomly Building "Processing Time" and "Due Date"
 class Jobs:
@@ -23,36 +33,21 @@ def data_collection(sequence, lap, tard):
         sequence["%s"%(lap//by)]=tard
     return sequence
 
-def best(cases):
-    all_case = [tardiness(case) for case in cases]
-    best_case = cases[[case[1] for case in all_case].index(min([case[1] for case in all_case]))]
-    return best_case
+def replacement_operator(population, offsprings):
+    result_population = population + offsprings
+    result_population.sort(key = lambda seq : tardiness(seq)[1])
+    return result_population[0:params['POP_SIZE']]
 
-def candidate(ini_seq):
-    ini_seq_tmp = ini_seq.copy()
-    dtt_jobs = [ini_seq_tmp.pop(np.random.randint(len(ini_seq_tmp))) for _ in
-                range(np.random.randint(1, len(ini_seq_tmp)))]
-    for con_jobs in dtt_jobs:
-        every_case = []
-        for j in range(len(ini_seq_tmp) + 1):
-            ini_seq_tmp.insert(j, con_jobs)
-            every_case.append(tuple(ini_seq_tmp))
-            ini_seq_tmp.pop(j)
-        ini_seq_tmp = list(best(every_case))
-    return tardiness(ini_seq_tmp)
+def crossover_operator(mom_cho, dad_cho):
+    indexes = sorted(np.random.choice([i for i in range(len(Job_names))], 2, replace = False))
+    middle = mom_cho[indexes[0]:indexes[1]]
+    left = [jb for jb in dad_cho if jb not in middle]
+    return left[0:indexes[0]] + middle + left[indexes[0]:]
 
-def evolve(ini_seq):
-    each_tardiness, total_tardiness = ini_seq
-    iga_result = {}
-    ini_time = time.time()
-    lapse = time.time() - ini_time
-    while lapse//by <= Time//by:
-        final_tardiness = candidate(list(each_tardiness))
-        if final_tardiness[1] < total_tardiness:
-            each_tardiness, total_tardiness = final_tardiness
-        iga_result = data_collection(iga_result, lapse, total_tardiness)
-        lapse = time.time() - ini_time
-    return iga_result
+def selection_operator(population):
+    mom_ch = population[0]
+    dad_ch = population[np.random.randint(1, len(population))]
+    return mom_ch, dad_ch
 
 def localsearch(ini_seq, search, nei):
     candidates = []
@@ -60,68 +55,55 @@ def localsearch(ini_seq, search, nei):
         ini_seq_tmp = ini_seq.copy()
         if nei:
             cvt = np.random.randint(len(ini_seq_tmp) - 1)
-            job = ini_seq_tmp.pop(cvt)
-            ini_seq_tmp.insert(cvt + 1, job)
+            ini_seq_tmp.insert(cvt + 1, ini_seq_tmp.pop(cvt))
             candidates.append(ini_seq_tmp)
         else:
             dtt_job = ini_seq_tmp.pop(np.random.randint(len(ini_seq_tmp)))
             ini_seq_tmp.insert(np.random.randint(len(ini_seq_tmp)) + 1, dtt_job)
             candidates.append(ini_seq_tmp)
-    ini_seq_tmp = list(best(candidates))
-    return tardiness(ini_seq_tmp)
+    return candidates
 
-def iteration(ini_seq, nei):
-    # SA Parameters / Able to modify values
-    temperature_initial = 50
-    temperature_k = 0.99
-    iteration_max = 20
-    search_max = 5
+def mutation_operator(chromosome, search = 1, rate = params['MUT']):
+    if np.random.random() <= rate:
+        return localsearch(chromosome, search, np.random.randint(2))
+    else:
+        return [chromosome]
 
-    ini_time = time.time()
-
+def gen(ini_seq):
     each_sequence, total_tardiness = ini_seq
-    temperature = temperature_initial
-    same_count = 0
-    search = 1
-
-    sa_ans_result = {}
+    population = [each_sequence] # 해집단
+    operation = mutation_operator(each_sequence, search = params['POP_SIZE'] - 1, rate = 1)
+    population.extend(operation)
+    population.sort(key = lambda seq : tardiness(seq)[1])
+    ini_time = time.time()
+    ga_result = {}
     lapse = time.time() - ini_time
+
     while lapse//by <= Time//by :
-        iteration_compare = 0
+        offsprings = [] # 자식해집단
+        for i in range(params["NUM_OFFSPRING"]):
+            mom_ch, dad_ch = selection_operator(population)
+            offspring = mutation_operator(chromosome = crossover_operator(mom_ch, dad_ch))
+            offsprings.extend(offspring)
+        population_tmp = population.copy()
+        population = replacement_operator(population,offsprings)
 
-        for _ in range(iteration_max):
-            final_tardiness = localsearch(list(each_sequence), search, nei)
+        result_td = tardiness(population[0])
+        if result_td[1] < tardiness(population_tmp[0])[1] or population != population_tmp:
+            each_sequence, total_tardiness = result_td
 
-            if final_tardiness[1] < total_tardiness:
-                each_sequence, total_tardiness = final_tardiness
-            else:
-                if np.random.random() < math.e ** ((total_tardiness - final_tardiness[1]) / temperature):
-                    each_sequence, total_tardiness = final_tardiness
-                else:
-                    iteration_compare += 1
-                same_count += 1
-        temperature *= temperature_k
-        if iteration_compare >= iteration_max / 2 and search < search_max:
-            search += 1
-        sa_ans_result=data_collection(sa_ans_result,lapse,total_tardiness)
+        ga_result = data_collection(ga_result, lapse, total_tardiness)
         lapse = time.time() - ini_time
-    return sa_ans_result
+
+    return ga_result
 
 def meta_heuristic(*args):
     spt = sorted(args[0], key=lambda name: name.processing_time)
-    if args[1]:
-        return evolve(tardiness(spt))
-    else:
-        return iteration(tardiness(spt), args[2])
+    if args[1]==2:
+        return gen(tardiness(spt))
 
-def IGA(names):
-    return meta_heuristic(names, 1), "IGA"
-
-def SA_ANS_Swap(names):
-    return meta_heuristic(names, 0, 1), "SA_ANS_Swap"
-
-def SA_ANS_Insert(names):
-    return meta_heuristic(names, 0, 0), "SA_ANS_Insert"
+def GA(names):
+    return meta_heuristic(names, 2, 2), "GA"
 
 # ------------------------------ Graph -------------------------------------
 
@@ -129,20 +111,15 @@ def graph(result):
     if isinstance(result[0], numbers.Integral):
         x = [period for period in range(int(Time / by) + 1)]
         y = [result[0] for _ in range(int(Time / by) + 1)]
-        if plt_type:
-            plt.plot(x, y, label=result[1])
-        else:
-            plt.scatter(x, y, label=result[1])
-        return y,result[1]
-
-    elif isinstance(result[0], dict):
+    else:
         x = [period for period in result[0]]
         y = [result[0][period] for period in result[0]]
-        if plt_type:
-            plt.plot(x, y, label=result[1])
-        else:
-            plt.scatter(x, y, label=result[1])
-        return y,result[1]
+
+    if plt_type:
+        plt.plot(x, y, label=result[1])
+    else:
+        plt.scatter(x, y, label=result[1])
+    return y,result[1]
 
 # ---------------------------------------------------------------------------
 
@@ -164,17 +141,9 @@ if __name__ == "__main__":
                  216, 320, 127, 63, 328, 66, 55, 304, 177, 261, 308, 61, 105, 110, 189, 278, 355, 61, 260, 308,
                  399, 336, 347, 241, 26, 292, 392, 58, 52, 2, 333, 343, 239, 179, 22, 154, 176, 161, 126, 304]
 
-
     ini_set = build(Job_names, Process_times, Due_dates)
 
-    Time = 2
-    by = 0.125
-
-    plt_type = 1 # [0 : dot graph(scatter) , 1 : line graph(plot) , else -> default 1 convert]
-    if plt_type != 1 or plt_type != 0:
-        plt_type = 1
-
-    methods = [IGA, SA_ANS_Swap]
+    methods = [GA]
     for func in methods:
         results = func(ini_set)
         final = graph(results)

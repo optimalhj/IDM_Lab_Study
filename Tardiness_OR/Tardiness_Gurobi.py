@@ -30,10 +30,7 @@ def tardiness(seqs):
 
     md.setObjective(gp.quicksum(td[job] for job in seqs), GRB.MINIMIZE)
     md.optimize()
-    '''
-    for job in seqs:
-        print(job.name,"/", "Start :", st[job].X, "Progress :", job.processing_time, "End :", et[job].X, "Due :", job.due, "--> Tardiness :", td[job].X)
-    '''
+
     return seqs, round(md.ObjVal)
 
 if __name__ == '__main__':
