@@ -22,8 +22,12 @@ Due_dates = [304, 143, 343, 218, 373, 260, 362, 387, 344, 204, 60, 225, 178, 324
              216, 320, 127, 63, 328, 66, 55, 304, 177, 261, 308, 61, 105, 110, 189, 278, 355, 61, 260, 308,
              399, 336, 347, 241, 26, 292, 392, 58, 52, 2, 333, 343, 239, 179, 22, 154, 176, 161, 126, 304]
 
-Time = 2
-by = 0.125
+Time = 1800
+by = 60
+
+plt_type = 0 # [0 : dot graph(scatter) , 1 : line graph(plot) , else -> default 1 convert]
+if plt_type != 1 or plt_type != 0:
+    plt_type = 1
 
 temperature_initial = 50
 temperature_k = 0.99
@@ -31,10 +35,6 @@ iteration_max = 20
 search_max = 5
 
 params = {'MUT': 0.5, 'POP_SIZE' : 10, 'NUM_OFFSPRING' : 5}
-
-plt_type = 0 # [0 : dot graph(scatter) , 1 : line graph(plot) , else -> default 1 convert]
-if plt_type != 1 or plt_type != 0:
-    plt_type = 1
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -206,9 +206,9 @@ def start_ga(ini_seq):
         population_tmp = population.copy()
         population = replacement_operator(population,offsprings)
 
-        result_td = tardiness(population[0])
-        if result_td[1] < tardiness(population_tmp[0])[1] or population != population_tmp:
-            sequence, total_tardiness = result_td
+        final_tardiness = tardiness(population[0])
+        if final_tardiness[1] < tardiness(population_tmp[0])[1] or population != population_tmp:
+            sequence, total_tardiness = final_tardiness
 
         ga_result = data_collection(ga_result, lapse, total_tardiness)
         lapse = time.time() - ini_time
