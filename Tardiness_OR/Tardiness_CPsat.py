@@ -1,6 +1,5 @@
 from ortools.sat.python import cp_model
 
-
 def tardiness(seqs):
     md = cp_model.CpModel()
 
@@ -28,7 +27,7 @@ def tardiness(seqs):
 
     # Tardiness = 0 or Tardiness = (End - Due)
     for jb in seqs:
-        md.add(td[jb] >= et[jb] - jb.due)
+        md.Add(td[jb] >= et[jb] - jb.due)
 
     md.Minimize(sum(td[jb] for jb in seqs))
 
