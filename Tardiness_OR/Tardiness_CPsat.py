@@ -34,9 +34,7 @@ def tardiness(seqs):
     solver = cp_model.CpSolver()
     status = solver.Solve(md)
 
-    return status, seqs, solver.ObjectiveValue()
-
-
+    return seqs, solver.ObjectiveValue()
 
 class Jobs:
     def __init__(self, name, pt, dd):
@@ -44,10 +42,8 @@ class Jobs:
         self.processing_time = pt
         self.due = dd
 
-
 def build(names, times, dates):
     return [Jobs(names[i], times[i], dates[i]) for i in range(len(names))]
-
 
 if __name__ == "__main__":
     # Custom Job Set needed(same length of lists)
@@ -71,9 +67,6 @@ if __name__ == "__main__":
     ini_set.sort(key = lambda jb: jb.processing_time)
     result = tardiness(ini_set)
 
-    if result[0] in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        for job in result[1]:
-            print(job.name, "/", job.processing_time, ",", job.due)
-        print("Total tardiness =", result[2])
-    else:
-        print("No solution found")
+    for job in result[0]:
+        print(job.name, "/", job.processing_time, ",", job.due)
+    print("Total tardiness =", result[1])

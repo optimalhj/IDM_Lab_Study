@@ -75,3 +75,5 @@ if __name__ == "__main__":
     for job in result[0]:
         print(job.name, "/", job.processing_time, ",", job.due)
     print(result[1])
+
+    print(result)
