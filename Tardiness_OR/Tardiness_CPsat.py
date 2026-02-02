@@ -32,7 +32,7 @@ def tardiness(seqs):
     md.Minimize(sum(td[jb] for jb in seqs))
 
     solver = cp_model.CpSolver()
-    status = solver.Solve(md)
+    solver.Solve(md)
 
     return seqs, solver.ObjectiveValue()
 

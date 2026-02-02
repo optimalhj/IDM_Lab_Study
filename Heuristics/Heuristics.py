@@ -1,4 +1,3 @@
-import numbers
 import time, math
 import numpy as np
 import matplotlib.pyplot as plt
@@ -22,8 +21,8 @@ Due_dates = [304, 143, 343, 218, 373, 260, 362, 387, 344, 204, 60, 225, 178, 324
              216, 320, 127, 63, 328, 66, 55, 304, 177, 261, 308, 61, 105, 110, 189, 278, 355, 61, 260, 308,
              399, 336, 347, 241, 26, 292, 392, 58, 52, 2, 333, 343, 239, 179, 22, 154, 176, 161, 126, 304]
 
-Time = 1800
-by = 60
+Time = 2
+by = 0.25
 
 plt_type = 0 # [0 : dot graph(scatter) , 1 : line graph(plot) , else -> default 1 convert]
 if plt_type != 1 or plt_type != 0:
@@ -52,11 +51,11 @@ def build(names, times, dues):
 
 # Calculating each job's tardiness and total tardiness
 def tardiness(seqs):
-    now, each_td = 0, {}
+    now, total_tardiness = 0, 0
     for job in seqs:
         now += job.processing_time
-        each_td[job] = max(now - job.due, 0)
-    return list(each_td), sum(each_td.values())
+        total_tardiness += max(now - job.due, 0)
+    return seqs, total_tardiness
 
 # -----------------------------SPT-----------------------------------------
 
@@ -85,7 +84,7 @@ def SLACK(names):
         slack.append(chosen_job)
     return tardiness(slack), "SLACK"
 
-# ------------------------- IGA + SA_ANS + GA ------------------------------------
+# --------------------- IGA + SA_ANS + GA ---------------------------------
 
 def data_collection(seq, lap, tard):
     if not "%s"%(lap//by) in list(seq.keys()):
@@ -238,8 +237,10 @@ def SA_ANS_Insert(names):
 def GA(names):
     return meta_heuristic(names, 2), "GA"
 
-def graph(result):
-    if isinstance(result[0][1], numbers.Integral):
+# --------------------- For Graph --------------------------------------
+
+def each_graph(result):
+    if result[1] in ("SPT", "EDD", "SLACK"):
         x = [period for period in range(int(Time / by) + 1)]
         y = [result[0][1] for _ in range(int(Time / by) + 1)]
         td = result[0][1]
@@ -254,22 +255,7 @@ def graph(result):
         plt.scatter(x, y, label=result[1])
     return td
 
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-
-    ini_set = build(Job_names, Process_times, Due_dates)
-
-    methods = [SPT, EDD, SLACK, IGA, SA_ANS_Swap, SA_ANS_Insert, GA]
-    for func in methods:
-        results = func(ini_set)
-        Tardiness = graph(results)
-        print("Type :", results[1], "  /   Tardiness =", Tardiness)
-        print("Sequence :", end = "")
-        for job in results[0][0]:
-            print(job.name, end = " ")
-        print()
-
+def final_graph():
     plt.xticks(rotation=45, fontsize=5)
     plt.title("Tardiness and Time")
     plt.legend(ncol=2, fontsize=8, title="Heuristics")
@@ -284,3 +270,21 @@ if __name__ == "__main__":
     plt.ylabel("Tardiness")
 
     plt.show()
+
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+
+    ini_set = build(Job_names, Process_times, Due_dates)
+
+    methods = [SPT, EDD, SLACK, IGA, SA_ANS_Swap, SA_ANS_Insert, GA]
+    for func in methods:
+        results = func(ini_set)
+        Tardiness = each_graph(results)
+        print("Type :", results[1], "  /   Tardiness =", Tardiness)
+        print("Sequence :", end = "")
+        for job in results[0][0]:
+            print(job.name, end = " ")
+        print()
+
+    final_graph()
