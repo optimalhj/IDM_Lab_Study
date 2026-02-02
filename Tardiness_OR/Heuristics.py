@@ -1,4 +1,3 @@
-import numbers
 import time
 import numpy as np
 import matplotlib.pyplot as plt
@@ -41,7 +40,6 @@ class Jobs:
         self.processing_time = processing_time
         self.due = due
         print(self.name, "-->", "Processing Time :", self.processing_time, "/ Due Date :", self.due)
-
 
 def build(names, times, dues):
     new_jobs = [Jobs(names[i], times[i], dues[i]) for i in range(len(names))]
@@ -153,7 +151,7 @@ def GA(names):
 # -------------------------- Drawing Graph ---------------------------------
 
 def graph(result):
-    if isinstance(result[0][1], numbers.Integral):
+    if result[1] in ("SPT", "EDD", "SLACK"):
         x = [period for period in range(int(Time / by) + 1)]
         y = [result[0][1] for _ in range(int(Time / by) + 1)]
         td = result[0][1]
@@ -167,6 +165,22 @@ def graph(result):
     else:
         plt.scatter(x, y,label="%s-%s" %(result[1], td_type))
     return td
+
+def final_graph():
+    plt.xticks(rotation=45, fontsize=5)
+    plt.title("Tardiness and Time")
+    plt.legend(ncol=2, fontsize=8, title="Heuristics")
+    if by == 1:
+        plt.xlabel("Time(second)")
+    elif by == 60:
+        plt.xlabel("Time(minute)")
+    elif by == 3600:
+        plt.xlabel("Time(hour)")
+    else:
+        plt.xlabel("Time(per %s seconds)"%by)
+    plt.ylabel("Tardiness")
+
+    plt.show()
 
 # ---------------------------------------------------------------------------
 
@@ -186,17 +200,4 @@ if __name__ == "__main__":
                 print(job.name, end = " ")
             print()
 
-    plt.xticks(rotation=45, fontsize=5)
-    plt.title("Tardiness and Time")
-    plt.legend(ncol=2, fontsize=8, title="Heuristics")
-    if by == 1:
-        plt.xlabel("Time(second)")
-    elif by == 60:
-        plt.xlabel("Time(minute)")
-    elif by == 3600:
-        plt.xlabel("Time(hour)")
-    else:
-        plt.xlabel("Time(per %s seconds)"%by)
-    plt.ylabel("Tardiness")
-
-    plt.show()
+    final_graph()
