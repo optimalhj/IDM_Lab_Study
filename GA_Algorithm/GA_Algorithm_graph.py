@@ -1,4 +1,3 @@
-import numbers
 import time
 import numpy as np
 import matplotlib.pyplot as plt
@@ -44,9 +43,22 @@ def crossover_operator(mom_cho, dad_cho):
     left = [jb for jb in dad_cho if jb not in middle]
     return left[0:indexes[0]] + middle + left[indexes[0]:]
 
-def selection_operator(population):
-    mom_ch = population[0]
-    dad_ch = population[np.random.randint(1, len(population))]
+def selection_operator(population, sel = np.random.randint(2)):
+
+    if sel == 0:   # fitness proportionate selection(roulette wheel selection)
+        tardiness_for_apply = [tardiness(pop)[1] for pop in population]
+        print(tardiness_for_apply)
+        mom_ch,dad_ch = np.random.choice(population, size = 2, replace = False, p = [td / sum(tardiness_for_apply) for td in tardiness_for_apply])
+
+    elif sel == 1:   # tournament selection
+        mom_ch = sorted(np.random.choice(population, size = max(2, params["POP_SIZE"] // 3), replace = False), key = lambda pop : tardiness(pop)[1])[0]
+        dad_ch = sorted(np.random.choice(population, size = max(2, params["POP_SIZE"] // 3), replace = False), key = lambda pop : tardiness(pop)[1])[0]
+
+    elif sel == 2:   # elitist preserving selection
+        mom_ch,dad_ch = population[0], population[1]
+
+    else:
+        mom_ch,dad_ch = population[0], population[np.random.randint(2,params["POP_SIZE"])]
     return mom_ch, dad_ch
 
 def localsearch(ini_seq, search, nei):
@@ -71,7 +83,7 @@ def mutation_operator(chromosome, search = 1, rate = params['MUT']):
 
 def gen(ini_seq):
     each_sequence, total_tardiness = ini_seq
-    population = [each_sequence] # 해집단
+    population = [each_sequence]
     operation = mutation_operator(each_sequence, search = params['POP_SIZE'] - 1, rate = 1)
     population.extend(operation)
     population.sort(key = lambda seq : tardiness(seq)[1])
@@ -80,7 +92,7 @@ def gen(ini_seq):
     lapse = time.time() - ini_time
 
     while lapse//by <= Time//by :
-        offsprings = [] # 자식해집단
+        offsprings = []
         for i in range(params["NUM_OFFSPRING"]):
             mom_ch, dad_ch = selection_operator(population)
             offspring = mutation_operator(chromosome = crossover_operator(mom_ch, dad_ch))
@@ -108,7 +120,7 @@ def GA(names):
 # ------------------------------ Graph -------------------------------------
 
 def graph(result):
-    if isinstance(result[0], numbers.Integral):
+    if result[1] in ("SPT", "EDD", "SLACK"):
         x = [period for period in range(int(Time / by) + 1)]
         y = [result[0] for _ in range(int(Time / by) + 1)]
     else:
