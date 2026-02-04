@@ -43,22 +43,23 @@ def crossover_operator(mom_cho, dad_cho):
     left = [jb for jb in dad_cho if jb not in middle]
     return left[0:indexes[0]] + middle + left[indexes[0]:]
 
-def selection_operator(population, sel = np.random.randint(2)):
-
+def selection_operator(population, sel):
     if sel == 0:   # fitness proportionate selection(roulette wheel selection)
         tardiness_for_apply = [tardiness(pop)[1] for pop in population]
-        print(tardiness_for_apply)
-        mom_ch,dad_ch = np.random.choice(population, size = 2, replace = False, p = [td / sum(tardiness_for_apply) for td in tardiness_for_apply])
-
+        mom_ch,dad_ch = np.random.choice(range(params["POP_SIZE"]), size = 2, replace = False, p = [td / sum(tardiness_for_apply) for td in tardiness_for_apply])
+        mom_ch, dad_ch = population[mom_ch], population[dad_ch]
+        print("Fitness")
     elif sel == 1:   # tournament selection
-        mom_ch = sorted(np.random.choice(population, size = max(2, params["POP_SIZE"] // 3), replace = False), key = lambda pop : tardiness(pop)[1])[0]
-        dad_ch = sorted(np.random.choice(population, size = max(2, params["POP_SIZE"] // 3), replace = False), key = lambda pop : tardiness(pop)[1])[0]
-
+        mom_ch, dad_ch = [population[min(np.random.choice(range(params["POP_SIZE"]), size = max(2, params["POP_SIZE"]//3), replace = False))] for _ in range(2)]
+        if mom_ch == dad_ch:
+            mom_ch, dad_ch = selection_operator(population, sel = 99)
+        print("Tournament")
     elif sel == 2:   # elitist preserving selection
         mom_ch,dad_ch = population[0], population[1]
-
+        print("Elitist")
     else:
         mom_ch,dad_ch = population[0], population[np.random.randint(2,params["POP_SIZE"])]
+        print("Else")
     return mom_ch, dad_ch
 
 def localsearch(ini_seq, search, nei):
@@ -94,7 +95,7 @@ def gen(ini_seq):
     while lapse//by <= Time//by :
         offsprings = []
         for i in range(params["NUM_OFFSPRING"]):
-            mom_ch, dad_ch = selection_operator(population)
+            mom_ch, dad_ch = selection_operator(population, np.random.randint(4))
             offspring = mutation_operator(chromosome = crossover_operator(mom_ch, dad_ch))
             offsprings.extend(offspring)
         population_tmp = population.copy()
