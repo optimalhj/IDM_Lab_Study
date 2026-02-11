@@ -15,65 +15,51 @@ class Jobs:
         self.due = due
         print(self.name, "-->", "Processing Time :", self.processing_time, "/ Due Date :", self.due)
 
+    def cp_assign(self, var_start, var_end, var_td):
+        self.start = var_start
+        self.end = var_end
+        self.td = var_td
+
 def build(names, times, dues):
     new_jobs = [Jobs(names[i], times[i], dues[i]) for i in range(len(names))]
     return new_jobs
 
 # ---------------------------------------------------------------------------
-
 def solve_cp_sat(jobs):
 
     md = cp_model.CpModel()
 
     horizon = sum(job.processing_time for job in jobs)
-
-    starts = {}
-    ends = {}
     intervals = {}
 
-    tds = {}
-
     for job in jobs:
-        start = md.NewIntVar(0, horizon, "start_%s"%job.name)
-        end = md.NewIntVar(0, horizon, "end_%s"%job.name)
-
-        starts[job] = start
-        ends[job] = end
-        intervals[job] = md.NewIntervalVar(start,job.processing_time,end, "Interval_%s"%job.name)
-        tds[job] = md.NewIntVar(0, horizon, "tardiness_%s"%job.name)
+        job.cp_assign(md.NewIntVar(0, horizon, "start_%s"%job.name), md.NewIntVar(0, horizon, "end_%s"%job.name), md.NewIntVar(0, horizon, "tardiness_%s"%job.name))
+        intervals[job] = md.NewIntervalVar(job.start,job.processing_time,job.end, "Interval_%s"%job.name)
 
     md.AddNoOverlap(intervals.values())
 
     for job in jobs:
-        md.add(tds[job] >= ends[job] - job.due)
+        md.add(job.td >= job.end - job.due)
 
-    md.Minimize(sum(tds[job] for job in jobs))
+    md.Minimize(sum(job.td for job in jobs))
 
     solver = cp_model.CpSolver()
     status = solver.Solve(md)
 
-    return solver, status, {"starts" : starts, "ends" : ends, "tds" : tds}
+    return solver, status
 
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
 
     ini_set = build(Job_names, Process_times, Due_dates)
-
-    solver, status, results = solve_cp_sat(ini_set)
+    solver, status = solve_cp_sat(ini_set)
 
     if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-        print(solver.ObjectiveValue())
-
-        assigned_jobs = []
-        starts = results["starts"]
-        ends = results["ends"]
-        tds = results["tds"]
-
-        for job in ini_set:
-            assigned_jobs.append({"job" : job ,"start" : solver.value(starts[job]), "end" : solver.value(ends[job]), "duration" : job.processing_time, "td" : solver.value(tds[job])})
+        assigned_jobs = [{"job" : job ,"start" : solver.value(job.start), "end" : solver.value(job.end), "duration" : job.processing_time, "td" : solver.value(job.td)} for job in ini_set]
         assigned_jobs.sort(key=lambda job: job["start"])
 
+        print("\nResult :", solver.ObjectiveValue())
         for job in assigned_jobs:
             print(job["job"].name, "__ start :", job["start"], "/ duration:", job["duration"], "/ end :", job["end"], "/ tardiness : %s - %s = %s" %(job["end"], job["job"].due, job["td"]))
 
