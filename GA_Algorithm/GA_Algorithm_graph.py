@@ -48,18 +48,14 @@ def selection_operator(population, sel):
         tardiness_for_apply = [tardiness(pop)[1] for pop in population]
         mom_ch,dad_ch = np.random.choice(range(params["POP_SIZE"]), size = 2, replace = False, p = [td / sum(tardiness_for_apply) for td in tardiness_for_apply])
         mom_ch, dad_ch = population[mom_ch], population[dad_ch]
-        print("Fitness")
     elif sel == 1:   # tournament selection
         mom_ch, dad_ch = [population[min(np.random.choice(range(params["POP_SIZE"]), size = max(2, params["POP_SIZE"]//3), replace = False))] for _ in range(2)]
         if mom_ch == dad_ch:
             mom_ch, dad_ch = selection_operator(population, sel = 99)
-        print("Tournament")
     elif sel == 2:   # elitist preserving selection
         mom_ch,dad_ch = population[0], population[1]
-        print("Elitist")
     else:
         mom_ch,dad_ch = population[0], population[np.random.randint(2,params["POP_SIZE"])]
-        print("Else")
     return mom_ch, dad_ch
 
 def localsearch(ini_seq, search, nei):
