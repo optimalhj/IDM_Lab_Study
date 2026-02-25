@@ -19,12 +19,11 @@ def build(names, times, dues):
 
 def start_scheduling(ini):
 
-    md=gp.Model("scheduling")
+    md=gp.Model()
     horizon = sum(job.due for job in ini)
 
     starts = md.addVars(ini, lb=0, ub=horizon, vtype=GRB.INTEGER)
     seq = {}
-
     n = len(ini)
     for i in range(n):
         seq[ini[i]] = {}
@@ -33,51 +32,22 @@ def start_scheduling(ini):
             md.addConstr(starts[ini[i]] + ini[i].processing_time - starts[ini[j]] <= horizon * (1 - seq[ini[i]][ini[j]]))
             md.addConstr(starts[ini[j]] + ini[j].processing_time - starts[ini[i]] <= horizon * seq[ini[i]][ini[j]])
 
-    '''
-    seq = {job1 : {job2 : md.addVar(vtype = GRB.BINARY) for job2 in ini if job2 != job1} for job1 in ini}
-    md.addConstrs(seq[job1][job2] + seq[job2][job1] == 1 for job2 in ini for job1 in ini if job1 != job2)
-    '''
-
-    '''
-    seq = {}
-    for job1 in ini:
-        seq[job1] = {}
-        for job2 in ini+["final"]:
-            if job2 == job1:
-                continue
-            else :
-                seq[job1][job2] = md.addVar(vtype = GRB.BINARY)
-    md.addConstr(gp.quicksum(seq[job1]["final"] for job1 in ini) == 1)
-    '''
-
-    '''
-    md.addConstrs(seq[job1][job2] + seq[job2][job1] == 1 for job2 in ini for job1 in ini if job1 != job2)
-    '''
-
-    '''
-    for job1 in ini:
-        for job2 in ini:
-            if job2 != job1:
-                md.addConstr((starts[job1] + job1.processing_time) - starts[job2] <= horizon * (1 - seq[job1][job2]))
-                md.addConstr((starts[job2] + job2.processing_time) - starts[job1] <= horizon * seq[job1][job2])
-    '''
-
     td = {}
     for job in ini:
         td[job] = md.addVar(0, horizon, vtype = GRB.INTEGER)
         md.addConstr(td[job] >= starts[job] + job.processing_time - job.due)
 
-    md.setObjective(sum(td[job] for job in ini), GRB.MINIMIZE)
+    md.setObjective(sum(td.values()), GRB.MINIMIZE)
 
     md.setParam('OutputFlag', 0)
     md.optimize()
 
     for job in sorted(ini, key = lambda jb : starts[jb].X):
         print(job.name,
-              " _ 시작 :", abs(starts[job].X),
+              " _ 시작 : %i"%starts[job].X,
               "/ 기간 :", job.processing_time,
-              "/ 끝 :", starts[job].X + job.processing_time,
-              "/ Td : %s - %s = %s"%(abs(starts[job].X), job.processing_time, abs(td[job].X))
+              "/ 끝 : %i"%(starts[job].X + job.processing_time),
+              "/ Td : %i - %s = %i"%(starts[job].X + job.processing_time, job.due, td[job].X)
               )
     print("Total : %i"%md.ObjVal)
 
