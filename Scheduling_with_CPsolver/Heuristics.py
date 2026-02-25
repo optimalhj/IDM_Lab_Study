@@ -3,9 +3,9 @@ from ortools.sat.python import cp_model
 # ---------------------------------- Initialization / Parameter ----------------------------------------
 
 # Custom Job Set needed(same length of lists)
-Job_names = ['J1', 'J2', 'J3', 'J4', 'J5']
-Process_times = [3, 5, 2, 4, 3]
-Due_dates = [12,8,4,15,10]
+Job_names = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6', 'J7', 'J8', 'J9', 'J10']
+Process_times = [7, 3, 12, 5, 9, 4, 6, 11, 2, 8]
+Due_dates = [22, 10, 25, 18, 30, 14, 28, 35, 8, 20]
 
 # Jobs to Class process / "Name" as Attribute and Randomly Building "Processing Time" and "Due Date"
 class Jobs:
