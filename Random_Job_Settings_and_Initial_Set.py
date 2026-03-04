@@ -16,18 +16,15 @@ for machine in Ini_Job_Set:
     print(machine, "\n", Ini_Job_Set[machine])
 print()
 
-def finding_horizon():
-    horizon = Longest_operation * Machines * Maximum_operation
+def destroy_operation():
+    horizon, new_machine , new_operation = Longest_operation * Machines * Maximum_operation, 0, 0
     for machine in Ini_Job_Set:
         for operation in Ini_Job_Set[machine]:
-            horizon = min(horizon, Ini_Job_Set[machine][operation])
-    return horizon
-
-def job_by_horizon(hrz):
-    for machine in Ini_Job_Set:
-        for operation in Ini_Job_Set[machine]:
-            if Ini_Job_Set[machine][operation] == hrz:
-                return machine, operation
+            if Ini_Job_Set[machine][operation] < horizon:
+                new_machine = machine
+                new_operation = operation
+                horizon = Ini_Job_Set[machine][operation]
+    return new_machine, new_operation
 
 def modify_operator(job_tmp):
     m, op = job_tmp
@@ -39,7 +36,7 @@ def modify_operator(job_tmp):
     return job_tmp
 
 def start():
-    return [modify_operator(job_by_horizon(finding_horizon())) for _ in range(len(Ini_Job_Set[list(Ini_Job_Set.keys())[0]]))]
+    return [modify_operator(destroy_operation()) for _ in range(len(Ini_Job_Set[list(Ini_Job_Set.keys())[0]]))]
 
 if __name__ == "__main__":
     result = start()
