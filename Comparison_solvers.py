@@ -6,7 +6,7 @@ from numpy import random
 from matplotlib import pyplot as plt
 from time import time
 
-Num_Jobs = 5
+Num_Jobs = 30
 
 plt_type = 1
 
@@ -137,7 +137,7 @@ def start():
     global horizon
 
     func = [
-        # (or_lp, "OR LP"),
+        #(or_lp, "OR LP"),
         (gp_lp,"GP LP"),
         (or_cp,"OR CP")]
     ways = {way[1] : [] for way in func}
