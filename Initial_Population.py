@@ -1,6 +1,7 @@
+from Initial_coding_set import setting
 from numpy import random
 from copy import deepcopy as dc
-from Initial_coding_set import setting
+
 
 def global_minimum(ini_job_tmp, order_per_job):
     ini_job = dc(ini_job_tmp)

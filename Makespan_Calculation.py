@@ -1,5 +1,6 @@
-import Initial_Population
 from Initial_coding_set import setting
+import Initial_Population
+
 
 def calculate(origin, operations):
     machines, jobs = {}, {}

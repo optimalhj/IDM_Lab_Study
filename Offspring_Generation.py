@@ -1,7 +1,7 @@
-import Makespan_Calculation
-import Initial_Population
-import Population_Selection
 from Initial_coding_set import setting
+import Initial_Population
+import Makespan_Calculation
+import Population_Selection
 from numpy import random
 
 def pox(mom_cho, dad_cho):

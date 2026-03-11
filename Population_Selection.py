@@ -1,6 +1,7 @@
+from Initial_coding_set import setting
 import Initial_Population
 import Makespan_Calculation
-from Initial_coding_set import setting
+
 from numpy import random
 
 def binary_tournament(origin, ini_pop):
