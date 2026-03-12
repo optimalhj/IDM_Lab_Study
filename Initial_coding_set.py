@@ -1,12 +1,11 @@
-
 from numpy import random
 
 def setting():
-    params = {"pop_size": 10,
-              "num_of_gens": 40,
+    params = {"pop_size": 50,
+              "num_of_gens": 100,
               "ini_assign": [0.1, 0.9],
               "ini_seq": [0.2, 0.4, 0.4],
-              "crossover": [0.45, 0.45, 0.2, 0.2, 0.6]}
+              "crossover": [0.45, 0.45, 0.02, 0.02, 0.06]}
 
     Machines = 4
     Jobs = 4

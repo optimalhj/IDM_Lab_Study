@@ -119,8 +119,8 @@ def start(ini_job, population_size, ini_assign, ini_seq):
 
 if __name__ == "__main__":
 
-    Ini_Job_Set, params = setting()
-    result = start(Ini_Job_Set, population_size=params["pop_size"],
+    Ini_Set, params = setting()
+    result = start(Ini_Set, population_size=params["pop_size"],
                          ini_assign=params["ini_assign"], ini_seq=params["ini_seq"])
 
     print("Total :", len(result))

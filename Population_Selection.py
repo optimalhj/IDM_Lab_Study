@@ -1,7 +1,6 @@
 from Initial_coding_set import setting
 import Initial_Population
 import Makespan_Calculation
-
 from numpy import random
 
 def binary_tournament(origin, ini_pop):
@@ -14,7 +13,6 @@ def binary_tournament(origin, ini_pop):
         else:
             candidates.append([indices.pop(random.randint(len(indices))) for _ in range(2)])
     new_candidates = [Makespan_Calculation.versus(origin, [ini_pop[idx] for idx in candidate]) for candidate in candidates]
-
     if len(new_candidates) > 2:
         return binary_tournament(origin, new_candidates)
     else:
