@@ -1,5 +1,3 @@
-from Initial_coding_set import setting
-import Initial_Population
 import Makespan_Calculation
 from numpy import random
 
@@ -26,7 +24,6 @@ def n_size_tournament(origin, ini_pop):
             n_size = random.randint(2, len(indices))
         else:
             n_size = len(indices)
-
         if len(indices) < n_size:
             candidates.append(indices)
             break
@@ -34,7 +31,6 @@ def n_size_tournament(origin, ini_pop):
             candidates.append([indices.pop(random.randint(len(indices))) for _ in range(n_size)])
     new_candidates = [Makespan_Calculation.versus(origin, [ini_pop[idx] for idx in candidate]) for candidate in
                       candidates]
-
     if len(new_candidates) == 2:
         return new_candidates
     else:
@@ -47,20 +43,13 @@ def linear_ranking(origin, ini_pop):
 
 def start(origin, ini_pop):
 
-    way = random.randint(3)
-    if way == 0: # Binary tournament
+    way_pop_select = random.randint(3)
+
+    if way_pop_select == 0: # Binary tournament
         return binary_tournament(origin, ini_pop)
-    elif way == 1: # n-Size tournament
+    elif way_pop_select == 1: # n-Size tournament
         return n_size_tournament(origin, ini_pop)
-    elif way == 2:  # Linear ranking
+    elif way_pop_select == 2:  # Linear ranking
         return linear_ranking(origin, ini_pop)
     else:  # Do not reach
         return 0
-
-if __name__ == "__main__":
-    Ini_Job_Set, params = setting()
-    Original, Initial_Pop = Initial_Population.start(Ini_Job_Set, population_size=params["pop_size"],
-                                        ini_assign=params["ini_assign"], ini_seq=params["ini_seq"])
-    mother, father = start(Original, Initial_Pop)
-    print(Makespan_Calculation.calculate(Original, mother), mother)
-    print(Makespan_Calculation.calculate(Original, father), father)

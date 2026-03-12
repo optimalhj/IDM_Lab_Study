@@ -1,6 +1,3 @@
-import Makespan_Calculation
-from Initial_coding_set import setting
-import Initial_Population
 import Population_Selection
 from numpy import random
 
@@ -22,6 +19,7 @@ def pox(mom_cho, dad_cho):
                 offspring.append(not_fixed_operation.pop(0))
         offsprings.append(offspring)
     return offsprings
+
 def assignment_crossover(mom_cho,dad_cho):
     offsprings = []
     parents = (mom_cho, dad_cho)
@@ -41,8 +39,8 @@ def pps(mom_cho,dad_cho):
         if indices[place] != len(mom_cho) - 1 and place != len(indices) - 1 and indices[place] + 1 != indices[place + 1]:
             offspring.insert(random.choice(range(indices[place] + 1, indices[place + 1]), size = 1)[0], offspring.pop(idx_job))
         offsprings.append(offspring)
-
     return offsprings
+
 def assignment_mutation(ini_set, mom_cho, dad_cho):
     offsprings = []
     parents = (mom_cho, dad_cho)
@@ -68,10 +66,9 @@ def assignment_intelligent_mutation(origin, ini_set, mom_cho,dad_cho):
         offspring.append(parent[0:idx] + [new_operation] + parent[idx + 1:])
     return offspring
 
-def way_select(origin, ini_job, ini_set, mom_cho, dad_cho, rates):
+def way_select(origin, ini_set, mom_cho, dad_cho, rates):
 
     way_operator = random.choice([i for i in range(len(rates))], size=1, p=rates, replace=False)
-    way_operator = 3
     if way_operator == 0:
         offspring = pox(mom_cho, dad_cho)
     elif way_operator == 1:
@@ -90,22 +87,5 @@ def start(origin, ini_pop, ini_set, crossover, pop_size):
     offsprings = []
     for _ in range(pop_size):
         mother, father = Population_Selection.start(origin, ini_pop)
-        offsprings.extend(way_select(origin, ini_pop, ini_set, mother, father, crossover))
+        offsprings.extend(way_select(origin, ini_set, mother, father, crossover))
     return offsprings
-
-if __name__ == "__main__":
-    Ini_Set, params = setting()
-    Original, Initial_Pop = Initial_Population.start(Ini_Set,
-                                        population_size = params["pop_size"],
-                                        ini_assign = params["ini_assign"],
-                                        ini_seq = params["ini_seq"])
-    result = start(Original, Initial_Pop, Ini_Set, params["crossover"], params["pop_size"])
-
-    count = 0
-    total_count = 0
-    for off in result:
-        print(Makespan_Calculation.calculate(Original, off), off)
-        total_count += 1
-        if off != result[0]:
-            count += 1
-    print("not same rate =",count/total_count*100)

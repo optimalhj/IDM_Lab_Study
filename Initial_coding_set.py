@@ -2,28 +2,29 @@ from numpy import random
 
 def setting():
     params = {"pop_size": 50,
-              "num_of_gens": 100,
+              "num_of_gens": 35,
               "ini_assign": [0.1, 0.9],
               "ini_seq": [0.2, 0.4, 0.4],
               "crossover": [0.45, 0.45, 0.02, 0.02, 0.06]}
 
-    Machines = 4
-    Jobs = 4
-    Maximum_operation = 4
-    Operations = [random.randint(2, Maximum_operation + 1) for job in range(Jobs)]
-    Longest_duration = 9
+    machines = 4
+    jobs = 4
+    maximum_operation = 4
+    operations = [random.randint(2, maximum_operation + 1) for job in range(jobs)]
+    longest_duration = 9
 
-    Ini_Job_Set = {"M%d" % (machine + 1)
+    ini_set = {"M%d" % (machine + 1)
                    : {"J%d" % (job + 1)
-                      : {"O%d" % (operation + 1): random.randint(1, Longest_duration + 1)
-                         for operation in range(Operations[job])}
-                      for job in range(Jobs)}
-                   for machine in range(Machines)}
-    for machine in Ini_Job_Set:
-        print(machine, "\n", Ini_Job_Set[machine])
+                      : {"O%d" % (operation + 1): random.randint(1, longest_duration + 1)
+                         for operation in range(operations[job])}
+                      for job in range(jobs)}
+                   for machine in range(machines)}
+
+    for machine in ini_set:
+        print(machine, "\n", ini_set[machine])
     print()
 
-    return Ini_Job_Set, params
+    return ini_set, params
 
 def start():
     return setting()

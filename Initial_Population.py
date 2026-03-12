@@ -1,7 +1,5 @@
-from Initial_coding_set import setting
 from numpy import random
 from copy import deepcopy as dc
-
 
 def global_minimum(ini_job_tmp, order_per_job):
     ini_job = dc(ini_job_tmp)
@@ -26,7 +24,6 @@ def random_permutation(ini_job_tmp):
     first_set = []
     random_machine_seq = random.choice(list(ini_job), size = len(ini_job), replace = False)
     random_job_seq = random.choice([job for job in ini_job[list(ini_job)[0]]], size = len(ini_job[list(ini_job)[0]]), replace = False)
-
     for job in random_job_seq:
         for operation in ini_job[random_machine_seq[0]][job]:
             plus_time, new_machine, new_job, new_operation = 999999, 0, 0, 0
@@ -116,13 +113,3 @@ def start(ini_job, population_size, ini_assign, ini_seq):
     for _ in range(population_size):
         sets.append(initial_pop(original, ini_job, order_per_job,ini_assign, ini_seq))
     return original, sets
-
-if __name__ == "__main__":
-
-    Ini_Set, params = setting()
-    result = start(Ini_Set, population_size=params["pop_size"],
-                         ini_assign=params["ini_assign"], ini_seq=params["ini_seq"])
-
-    print("Total :", len(result))
-    for case in result:
-        print(len(case), case)

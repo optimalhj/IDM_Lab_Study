@@ -11,5 +11,6 @@ def start():
     result = Offspring_Evaluation_and_Generation.start(original, initial_pop, ini_set, params["num_of_gens"], params["crossover"], params["pop_size"])
     for gen in result:
         print("Generation %s :"%gen, result[gen])
+
 if __name__ == "__main__":
     start()
