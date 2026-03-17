@@ -76,58 +76,51 @@ def generate_offsprings(origin, mom,dad,rates,m):
             offsprings.append(parents[i][0:idx] + [new_operation] + parents[i][idx + 1:])
 
         else:  # Do not reach
-            offspring = 0
-
+            offsprings = 0
     return offsprings
 
-def binary_tournament(origin, ini_pop):
-    indices = [i for i in range(len(ini_pop))]
-    candidates = []
-    while len(indices) > 0:
-        if len(indices) < 2:
-            candidates.append(indices)
-            break
-        else:
-            candidates.append([indices.pop(random.randint(len(indices))) for _ in range(2)])
-    new_candidates = [versus(origin, [ini_pop[idx] for idx in candidate]) for candidate in candidates]
+def select_pop(origin, ini_pop, way_select_pop):
 
-    if len(new_candidates) > 2:
-        return binary_tournament(origin, new_candidates)
-    else:
-        return new_candidates
-
-def n_size_tournament(origin, ini_pop):
-    indices = [i for i in range(len(ini_pop))]
-    candidates = []
-    while len(indices) > 0:
-        if len(indices) >= 3:
-            n_size = random.randint(2, len(indices))
-        else:
-            n_size = len(indices)
-        if len(indices) < n_size:
-            candidates.append(indices)
-            break
-        else:
-            candidates.append([indices.pop(random.randint(len(indices))) for _ in range(n_size)])
-    new_candidates = [versus(origin, [ini_pop[idx] for idx in candidate]) for candidate in candidates]
-    if len(new_candidates) == 2:
-        return new_candidates
-    else:
-        return n_size_tournament(origin, new_candidates)
-
-def linear_ranking(origin, ini_pop):
-    tmp = sorted(ini_pop, key = lambda case : calculate(origin, case))
-    idx1, idx2 = random.choice([i for i in range(0, len(ini_pop))], size = 2, replace = False, p = [2 * i / (len(tmp) * (len(tmp) + 1)) for i in range(1, len(tmp) + 1)])
-    return tmp[idx1], tmp[idx2]
-
-def select_pop(origin, ini_pop):
-    way_select_pop = random.randint(3)
     if way_select_pop == 0: # Binary tournament
-        return binary_tournament(origin, ini_pop)
+        indices = [i for i in range(len(ini_pop))]
+        candidates = []
+        while len(indices) > 0:
+            if len(indices) < 2:
+                candidates.append(indices)
+                break
+            else:
+                candidates.append([indices.pop(random.randint(len(indices))) for _ in range(2)])
+        new_candidates = [versus(origin, [ini_pop[idx] for idx in candidate]) for candidate in candidates]
+
+        if len(new_candidates) > 2:
+            return select_pop(origin, new_candidates, 0)
+        else:
+            return new_candidates
+
     elif way_select_pop == 1: # n-Size tournament
-        return n_size_tournament(origin, ini_pop)
+        indices = [i for i in range(len(ini_pop))]
+        candidates = []
+        while len(indices) > 0:
+            if len(indices) >= 3:
+                n_size = random.randint(2, len(indices))
+            else:
+                n_size = len(indices)
+            if len(indices) < n_size:
+                candidates.append(indices)
+                break
+            else:
+                candidates.append([indices.pop(random.randint(len(indices))) for _ in range(n_size)])
+        new_candidates = [versus(origin, [ini_pop[idx] for idx in candidate]) for candidate in candidates]
+        if len(new_candidates) == 2:
+            return new_candidates
+        else:
+            return select_pop(origin, new_candidates, 1)
+
     elif way_select_pop == 2:  # Linear ranking
-        return linear_ranking(origin, ini_pop)
+        tmp = sorted(ini_pop, key=lambda case: calculate(origin, case))
+        idx1, idx2 = random.choice([i for i in range(0, len(ini_pop))], size=2, replace=False, p=[2 * i / (len(tmp) * (len(tmp) + 1)) for i in range(1, len(tmp) + 1)])
+        return tmp[idx1], tmp[idx2]
+
     else:  # Do not reach
         return 0
 
@@ -158,14 +151,6 @@ def initial_pop(origin, m, jo, assign, seq):
             for job in tmp_set[new_machine]:
                 for operation in tmp_set[new_machine][job]:
                     tmp_set[new_machine][job][operation] += plus_time
-            '''
-            print("Destroyed :", (new_machine, new_job, new_operation))
-            for machine in ini_job:
-                print(machine)
-                print(ini_job[machine])
-            print("Result :", first_set)
-            print()
-            '''
 
     elif way_assign == 1: # Randomly Permute Jobs and Machins
         random_machine_seq = random.choice(m, size=len(m), replace=False)
@@ -175,13 +160,7 @@ def initial_pop(origin, m, jo, assign, seq):
                             {operation: getattr(origin, f"{machine}{job}{operation}") for operation in jo[job]}
                         for job in random_job_seq}
                    for machine in random_machine_seq}
-        '''
-        print()
-        for machine in tmp_set:
-            print(machine)
-            print(tmp_set[machine])
-        print()
-        '''
+
         for job in random_job_seq:
             for operation in tmp_set[m[0]][job]:
                 plus_time, new_machine, new_job, new_operation = 999999, 0, 0, 0
@@ -194,14 +173,7 @@ def initial_pop(origin, m, jo, assign, seq):
                 for job_tmp in jo:
                     for operation_tmp in tmp_set[m[0]][job_tmp]:
                         tmp_set[new_machine][job_tmp][operation_tmp] += plus_time
-                '''
-                print("Destroyed :", (new_machine, new_job, new_operation))
-                for machine in tmp_set:
-                    print(machine)
-                    print(tmp_set[machine])
-                print("Result :", first_set)
-                print()
-                '''
+
     else: # Do not reach
         popped.append(0)
     
@@ -225,27 +197,13 @@ def initial_pop(origin, m, jo, assign, seq):
             reference[operation[1]][0].append(operation)
             reference[operation[1]][0].sort(key=lambda job: jo[job[1]].index(job[2]))
             reference[operation[1]][1] += getattr(origin, f"{operation[0]}{operation[1]}{operation[2]}")
-        '''
-        print()
-        for job in reference:
-            print(job)
-            print(reference[job])
-        print()
-        '''
+
         reference_job = [job for job in reference]
         while len(set_tmp) < length:
             reference_job.sort(key=lambda job: reference[job][1], reverse=True)
             set_tmp.append(reference[reference_job[0]][0].pop(0))
             reference[reference_job[0]][1] -= getattr(origin,
                                                       f"{set_tmp[-1][0]}{set_tmp[-1][1]}{set_tmp[-1][2]}")
-            '''
-            print("Destroyed :", set_tmp[-1], getattr(origin, f"{set_tmp[-1][0]}{set_tmp[-1][1]}{set_tmp[-1][2]}"))
-            for job in reference:
-                print(job)
-                print(reference[job])
-            print()
-            print("Result :", set_tmp)
-            '''
 
     elif way_seq == 2: # Most Number of Operations Remaining(MOR)
         reference = {job: [[], 0] for job in jo}
@@ -253,27 +211,13 @@ def initial_pop(origin, m, jo, assign, seq):
             reference[operation[1]][0].append(operation)
             reference[operation[1]][0].sort(key=lambda job: jo[job[1]].index(job[2]))
             reference[operation[1]][1] += 1
-        '''
-        print()
-        for job in reference:
-            print(job)
-            print(reference[job])
-        print()
-        '''
 
         reference_job = [job for job in reference]
         while len(set_tmp) < length:
             reference_job.sort(key=lambda job: reference[job][1], reverse=True)
             set_tmp.append(reference[reference_job[0]][0].pop(0))
             reference[reference_job[0]][1] -= 1
-            '''
-            print("Destroyed :", set_tmp[-1])
-            for job in reference:
-                print(job)
-                print(reference[job])
-            print("Result :", set_tmp)
-            print()
-            '''
+
     else: # Do not reach
         set_tmp = 0
 
@@ -336,7 +280,7 @@ def start():
     generations, best_child, horizon = {}, 0, 9999999
     for Gen in range(1, params["num_of_gens"] + 1):
         offsprings = []
-        mother, father = select_pop(original, ini_pop)
+        mother, father = select_pop(original, ini_pop, random.randint(3))
         for _ in range(params["pop_size"]):
             offspring = generate_offsprings(original, mother, father, params["crossover"], machines)
             offsprings.extend(offspring)
