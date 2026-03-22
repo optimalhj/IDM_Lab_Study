@@ -36,16 +36,15 @@ def makespan(origin, ini_set):
     for job_type in start_end_per_each_job:
         for job in start_end_per_each_job[job_type]:
             for op in start_end_per_each_job[job_type][job]:
-                for machine in binary_space[job_type][job][op]:
+
+                for machine in start_end_per_each_job[job_type][job][op]:
                     start_end_per_machine[machine][(job_type, job, op)] = [md.addVar(vtype=GRB.CONTINUOUS) for _ in range(2)]
                     md.addConstrs(start_end_per_each_job[job_type][job][op][machine][i] == start_end_per_machine[machine][(job_type, job, op)][i] for i in range(2))
-                    md.addConstr(start_end_per_machine[machine][(job_type, job, op)][0] >= 0)
-                    md.addConstr(start_end_per_machine[machine][(job_type, job, op)][1] == start_end_per_machine[machine][(job_type, job, op)][0] + getattr(origin, f"{job_type}{job}{op}{machine}") * binary_space[job_type][job][op][machine])
 
-                if op != list(start_end_per_each_job[job_type][job])[len(start_end_per_each_job[job_type][job]) - 1]:
-                    tmp_var = md.addVar(vtype=GRB.CONTINUOUS)
-                    md.addGenConstrMax(tmp_var, [start_end_per_each_job[job_type][job][op][start_and_end][1] for start_and_end in start_end_per_each_job[job_type][job][op]])
-                    md.addConstrs(start_end_per_each_job[job_type][job][list(start_end_per_each_job[job_type][job])[list(start_end_per_each_job[job_type][job]).index(op) + 1]][machine][0] >= tmp_var for machine in start_end_per_each_job[job_type][job][op])
+                    if op != list(start_end_per_each_job[job_type][job])[0]:
+                        tmp_var = md.addVar(vtype=GRB.CONTINUOUS)
+                        md.addGenConstrMax(tmp_var, [start_end_per_each_job[job_type][job][list(start_end_per_each_job[job_type][job])[list(start_end_per_each_job[job_type][job]).index(op) - 1]][start_and_end][1] for start_and_end in start_end_per_each_job[job_type][job][op]])
+                        md.addConstr(start_end_per_each_job[job_type][job][op][machine][0] >= tmp_var)
 
     for machine in start_end_per_machine:
         n = len(start_end_per_machine[machine])
@@ -85,31 +84,28 @@ def makespan(origin, ini_set):
     '''
 
     operations_per_machines = {machine : [] for machine in start_end_per_machine}
-    assigned_job = []
+    colors_info = []
     for machine in start_end_per_machine:
         for operation in start_end_per_machine[machine]:
             job_type, job, op = operation
             if binary_space[job_type][job][op][machine].X != 0:
                 operations_per_machines[machine].append(operation)
-            if (job_type, job) not in assigned_job:
-                assigned_job.append((job_type, job))
+            if (job_type, job) not in colors_info:
+                colors_info.append((job_type, job))
 
-    colors = plt.get_cmap('tab20', len(assigned_job))
     fig, ax = plt.subplots()
     for machine in operations_per_machines:
         for operation in operations_per_machines[machine]:
             job_type, job, op = operation
             start_info, end_info = [time_info.X for time_info in start_end_per_each_job[job_type][job][op][machine]]
-            ax.barh(machine, end_info-start_info, left=start_info, color=colors(assigned_job.index((job_type, job))), edgecolor='black')
-            ax.text(start_info + (end_info - start_info) / 2, machine, f"{job_type}\n{job}\n{op}\n({getattr(origin, f"{job_type}{job}{op}{machine}")})", va='center', ha='center', color='black', fontsize=7)
+            ax.barh(machine, end_info-start_info, left=start_info, color=plt.get_cmap('tab20', len(colors_info))(colors_info.index((job_type, job))), edgecolor='black')
+            ax.text((start_info + end_info) / 2, machine, f"{job_type}\n{job}\n{op}\n({getattr(origin, f"{job_type}{job}{op}{machine}")})", va='center', ha='center', color='black', fontsize=7)
     ax.set_yticks(range(len(operations_per_machines)))
     ax.set_yticklabels(list(operations_per_machines))
     ax.set_xlabel("Time")
     ax.set_title("Makespan_Result")
-    plt.tight_layout()
     plt.show()
     return md.ObjVal
-
 
 class Build:
     def __init__(self):
