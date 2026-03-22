@@ -82,26 +82,23 @@ def makespan(origin, ini_set):
                 print()
     print("-----------------------------------------------------------------------------------------------------")
     '''
-
-    operations_per_machines = {machine : [] for machine in start_end_per_machine}
     colors_info = []
     for machine in start_end_per_machine:
         for operation in start_end_per_machine[machine]:
-            job_type, job, op = operation
-            if binary_space[job_type][job][op][machine].X != 0:
-                operations_per_machines[machine].append(operation)
+            job_type, job, _ = operation
             if (job_type, job) not in colors_info:
                 colors_info.append((job_type, job))
 
     fig, ax = plt.subplots()
-    for machine in operations_per_machines:
-        for operation in operations_per_machines[machine]:
+    for machine in start_end_per_machine:
+        for operation in start_end_per_machine[machine]:
             job_type, job, op = operation
-            start_info, end_info = [time_info.X for time_info in start_end_per_each_job[job_type][job][op][machine]]
-            ax.barh(machine, end_info-start_info, left=start_info, color=plt.get_cmap('tab20', len(colors_info))(colors_info.index((job_type, job))), edgecolor='black')
-            ax.text((start_info + end_info) / 2, machine, f"{job_type}\n{job}\n{op}\n({getattr(origin, f"{job_type}{job}{op}{machine}")})", va='center', ha='center', color='black', fontsize=7)
-    ax.set_yticks(range(len(operations_per_machines)))
-    ax.set_yticklabels(list(operations_per_machines))
+            if binary_space[job_type][job][op][machine].X != 0:
+                start_info, end_info = [time_info.X for time_info in start_end_per_each_job[job_type][job][op][machine]]
+                ax.barh(machine, end_info - start_info, left=start_info, color=plt.get_cmap('tab20', len(colors_info))(colors_info.index((job_type, job))), edgecolor='black')
+                ax.text((start_info + end_info) / 2, machine,f"{job_type}\n{job}\n{op}\n({getattr(origin, f"{job_type}{job}{op}{machine}")})", va='center', ha='center', color='black', fontsize=7)
+    ax.set_yticks(range(len(start_end_per_machine)))
+    ax.set_yticklabels(list(start_end_per_machine))
     ax.set_xlabel("Time")
     ax.set_title("Makespan_Result")
     plt.show()
