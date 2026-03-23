@@ -58,7 +58,6 @@ def makespan(origin, ini_set):
     md.addGenConstrMax(z, [start_end_per_machine[machine][operation][1] for machine in start_end_per_machine for operation in start_end_per_machine[machine]])
     md.setObjective(z, GRB.MINIMIZE)
     md.optimize()
-
     '''
     for job_type in binary_space:
         print(job_type)
@@ -123,6 +122,7 @@ def start():
     machines = [f"M{i}" for i in range(1,the_number_of_machines + 1)]
 
     built_parameter = {job_type : {f"Job{i+1}" : {f"OP{j+1}" : {machine:random.randint(1,max_time+1) for machine in machines} for j in range(num_op_of_type[job_type])} for i in range(num_job_of_type[job_type])} for job_type in job_types}
+
     original = Build()
 
     for job_type in built_parameter:
