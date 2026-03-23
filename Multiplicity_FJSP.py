@@ -9,7 +9,7 @@ def makespan(origin, ini_set):
     env.start()
     md = gp.Model(env=env)
 
-    binary_space, start_end_per_machine, start_end_per_each_job, seq_machine, horizon= {}, {}, {}, {}, 0
+    binary_space, start_end_per_machine, start_end_per_each_job, seq_machine = {}, {}, {}, {}
 
     for job_type in ini_set:
         binary_space[job_type] = {}
@@ -29,7 +29,6 @@ def makespan(origin, ini_set):
                     md.addConstr(start_end_per_each_job[job_type][job][op][machine][0] >= 0)
                     md.addConstr(start_end_per_each_job[job_type][job][op][machine][1] == start_end_per_each_job[job_type][job][op][machine][0] + getattr(origin, f"{job_type}{job}{op}{machine}") * binary_space[job_type][job][op][machine])
                     start_end_per_machine[machine] = {}
-                    horizon += getattr(origin, f"{job_type}{job}{op}{machine}")
 
                 md.addConstr(sum(binary_space[job_type][job][op].values()) == 1)
 
@@ -52,8 +51,8 @@ def makespan(origin, ini_set):
             seq_machine[list(start_end_per_machine[machine])[i]] = {}
             for j in range(i + 1, n):
                 seq_machine[list(start_end_per_machine[machine])[i]][list(start_end_per_machine[machine])[j]] = md.addVar(vtype=GRB.BINARY)
-                md.addConstr(start_end_per_machine[machine][list(start_end_per_machine[machine])[i]][1] - start_end_per_machine[machine][list(start_end_per_machine[machine])[j]][0] <= horizon * (1 - seq_machine[list(start_end_per_machine[machine])[i]][list(start_end_per_machine[machine])[j]]))
-                md.addConstr(start_end_per_machine[machine][list(start_end_per_machine[machine])[j]][1] - start_end_per_machine[machine][list(start_end_per_machine[machine])[i]][0] <= horizon * seq_machine[list(start_end_per_machine[machine])[i]][list(start_end_per_machine[machine])[j]])
+                md.addGenConstrIndicator(seq_machine[list(start_end_per_machine[machine])[i]][list(start_end_per_machine[machine])[j]], True, start_end_per_machine[machine][list(start_end_per_machine[machine])[i]][1] <= start_end_per_machine[machine][list(start_end_per_machine[machine])[j]][0])
+                md.addGenConstrIndicator(seq_machine[list(start_end_per_machine[machine])[i]][list(start_end_per_machine[machine])[j]], False, start_end_per_machine[machine][list(start_end_per_machine[machine])[j]][1] <= start_end_per_machine[machine][list(start_end_per_machine[machine])[i]][0])
 
     z = md.addVar(vtype=GRB.CONTINUOUS)
     md.addGenConstrMax(z, [start_end_per_machine[machine][operation][1] for machine in start_end_per_machine for operation in start_end_per_machine[machine]])
