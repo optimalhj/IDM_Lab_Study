@@ -9,7 +9,7 @@ def makespan(origin, ini_set):
     env.start()
     md = gp.Model(env=env)
 
-    binary_space, start_end_per_machine, start_end_per_each_job, seq_machine = {}, {}, {}, {}
+    binary_space, start_end_per_machine, start_end_per_each_job, seq_machine, colors_info = {}, {}, {}, {}, []
 
     for job_type in ini_set:
         binary_space[job_type] = {}
@@ -18,6 +18,8 @@ def makespan(origin, ini_set):
         for job in ini_set[job_type]:
             binary_space[job_type][job] = {}
             start_end_per_each_job[job_type][job] = {}
+            if (job_type, job) not in colors_info:
+                colors_info.append((job_type, job))
 
             for op in ini_set[job_type][job]:
                 binary_space[job_type][job][op] = {}
@@ -80,12 +82,6 @@ def makespan(origin, ini_set):
                 print()
     print("-----------------------------------------------------------------------------------------------------")
     '''
-    colors_info = []
-    for machine in start_end_per_machine:
-        for operation in start_end_per_machine[machine]:
-            job_type, job, _ = operation
-            if (job_type, job) not in colors_info:
-                colors_info.append((job_type, job))
 
     fig, ax = plt.subplots()
     for machine in start_end_per_machine:
