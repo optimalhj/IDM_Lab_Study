@@ -11,12 +11,12 @@ def start(durations,setups,machines):
     else:
         print("Something is wrong")
         print(f"Result_New : {result_new[0]} vs Result_Paper : {result_paper[0]}")
-        print("From New" if result_new[0] > result_paper[0] else "From Paper")
+        print("From New\n" if result_new[0] > result_paper[0] else "From Paper\n")
     return result_paper, result_new
 
 def main():
 
-    num_comparison = 5
+    num_comparison = 100
     # Parameter Input
     num_job_types = 2
     max_num_job = 3
