@@ -1,0 +1,14 @@
+num_comparison = 5
+
+# Parameter Input
+num_job_types = 2
+max_num_job = 3
+max_num_op = 3
+num_machines = 3
+max_time = 6
+max_setup_time = max(max_time // 2, 1)
+
+---
+
+Win Count
+Total 5 Comparisons / {'paper': 0, 'new': 5}
