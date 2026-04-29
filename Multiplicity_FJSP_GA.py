@@ -1,17 +1,16 @@
 from numpy import random as rd
 import matplotlib.pyplot as plt
-
-def calculate(origin, operations):
-    machines, jobs = {}, {}
+"""
+def calculate(duration, setup, operations):
+    end_machines, end_jobs = {}, {}
     for operation in operations:
-        machines[operation[0]] = 0
-        jobs[operation[1]] = 0
+        end_machines[operation[0]] = 0
+        end_jobs[operation[1]] = 0
     for operation in operations:
-        start_of_operation = max(machines[operation[0]], jobs[operation[1]])
-        machines[operation[0]] = start_of_operation + getattr(origin, f"{operation[0]}{operation[1]}{operation[2]}")
-        jobs[operation[1]] = start_of_operation + getattr(origin, f"{operation[0]}{operation[1]}{operation[2]}")
-    return max(machines.values())
-
+        start_of_operation = max(end_machines[operation[0]], end_jobs[operation[1]])
+        end_machines[operation[0]] = start_of_operation + getattr(duration, f"{operation[0]}{operation[1]}{operation[2]}")
+        end_jobs[operation[1]] = start_of_operation + getattr(duration, f"{operation[0]}{operation[1]}{operation[2]}")
+    return max(end_machines.values())
 def generate_offsprings(origin, mom, dad, rates, m):
     offsprings = []
     parents = (mom, dad)
@@ -74,7 +73,6 @@ def generate_offsprings(origin, mom, dad, rates, m):
         else:  # Do not reach
             offsprings = 0
     return offsprings
-
 def select_pop(origin, ini_pop, way_select_pop):
     if way_select_pop == 0:  # Binary tournament
         indices = [i for i in range(len(ini_pop))]
@@ -119,8 +117,6 @@ def select_pop(origin, ini_pop, way_select_pop):
 
     else:  # Do not reach
         return 0
-
-
 def graph(final):
     x = [Gen for Gen in final]
     y = [final[Gen][0] for Gen in final]
@@ -133,32 +129,91 @@ def graph(final):
     plt.xlabel("Generations")
     plt.ylabel("Tardiness")
     plt.show()
+"""
 
+def three_phase_decode(duration, setup, chromosome, ini_set, machines):
+    print(chromosome)
+
+    seq_o, seq_m = [], []
+    count = {gene : 1 for gene in chromosome}
+    
+    for l in range(len(chromosome)):
+        seq_o.append((ini_set[chromosome[l][0]]["jobs"][count[chromosome[l]]-1],chromosome[l]))
+        count[chromosome[l]] += 1
+
+    for job_type in ini_set:
+        for job in ini_set[job_type]["jobs"]:
+            l_set = [l for l in range(len(seq_o)) if job == seq_o[l][0] and job_type in seq_o[l][1]]
+            sort_op = sorted((seq_o[l] for l in l_set), key=lambda op:list(ini_set[job_type]["ops"]).index(op[1][1]))
+            for l in l_set:
+                seq_o[l] = sort_op.pop(0)
+
+    h, c_slash, c = 1, {0:{m:0 for m in machines}}, {job_type : {job : {0:0} for job in ini_set[job_type]["jobs"]} for job_type in ini_set}
+
+    for l in range(len(seq_o)):
+        print("\nh :", h)
+        i, j, k = seq_o[l][0], seq_o[l][1][0], list(ini_set[seq_o[l][1][0]]["ops"]).index(seq_o[l][1][1]) + 1
+        machines_list = ini_set[j]["ops"][list(ini_set[seq_o[l][1][0]]["ops"])[k - 1]]
+        print("selected operation :", j, i, k, "/ ", seq_o[l],f"/ machines : {machines_list}\n")
+        e_m = {}
+        for m in machines_list:
+            e_m[m] = getattr(duration, f"{j}{list(ini_set[j]["ops"])[k - 1]}") + max(c[j][i][k - 1], c_slash[h - 1][m])
+            print(f"Machine {m}'s Now : Start({max(c[j][i][k - 1], c_slash[h - 1][m])}) + Duration({getattr(duration, f"{j}{list(ini_set[j]["ops"])[k - 1]}")})", end=" ")
+
+            m_tmp = [m_idx for m_idx in range(len(seq_m)) if seq_m[m_idx] == m]
+            if len(m_tmp) > 0:
+                max_idx = max(m_tmp)
+                jp = seq_o[max_idx][1][0]
+                e_m[m] += getattr(setup, f"{jp}{list(ini_set[jp]["ops"])[list(ini_set[seq_o[max_idx][1][0]]["ops"]).index(seq_o[max_idx][1][1])]}{j}{list(ini_set[j]["ops"])[k - 1]}")
+                if jp != j:
+                    print(f"+ Setup time[({jp}, {list(ini_set[jp]["ops"])[list(ini_set[seq_o[max_idx][1][0]]["ops"]).index(seq_o[max_idx][1][1])]}) -> ({j}, {list(ini_set[j]["ops"])[k - 1]})]({getattr(setup, f"{jp}{list(ini_set[jp]["ops"])[list(ini_set[seq_o[max_idx][1][0]]["ops"]).index(seq_o[max_idx][1][1])]}{j}{list(ini_set[j]["ops"])[k - 1]}")})", end=" ")
+            print(f"= {e_m[m]}")
+        print("\nselected machine :", min(ini_set[j]["ops"][list(ini_set[seq_o[l][1][0]]["ops"])[k - 1]], key=lambda m:e_m[m]))
+        seq_m.append(min(machines_list, key=lambda m:e_m[m]))
+        c[j][i][k] = min(e_m.values())
+        c_slash[h] = {m : c[j][i][k] if m == seq_m[-1] else c_slash[h-1][m] for m in machines}
+
+        print("\nResult of operation :")
+        for m in machines:
+            print(f"\t{m} : {c_slash[h][m]}")
+
+        h += 1
+    print("-"* 60)
+    print(seq_o)
+    print(seq_m)
+    return seq_o, seq_m
 def start_ga(duration, setup, ini_set, machines, params):
-    op_types = [(job_type, op) for job_type in ini_set for op in ini_set[job_type]["ops"]]
+    op_types, job_per_types = [], {}
+    for job_type in ini_set:
+        job_per_types[job_type] = ini_set[job_type]["jobs"]
+        for _ in ini_set[job_type]["jobs"]:
+            for op in ini_set[job_type]["ops"]:
+                op_types.append((job_type, op))
+    #ini_chromosome = sorted(op_types, key=lambda op_type:getattr(duration, f"{op_type[0]}{op_type[1]}")) # by using SPT
+    ini_pop = []
 
-    ini_pop = sorted(op_types, key=lambda op_type:getattr(duration, f"{op_type[0]}{op_type[1]}")) # by using SPT
+    for _ in range(params["pop_size"]):
+        chromosome = [op_types[i] for i in rd.choice(range(len(op_types)), size=len(op_types), replace=False)]
+        ini_pop.append(three_phase_decode(duration, setup, chromosome, ini_set, machines))
+    print(ini_pop)
 
 class Duration:
-    def __init__(self):
-        pass
+    def __init__(self): pass
 class SetUp:
-    def __init__(self):
-        pass
+    def __init__(self): pass
 def start(durations, setups, machines_tmp, params):
     duration, setup, ini_set, machines = Duration(), SetUp(), {}, []
 
     for job_type in durations.keys():
-        ini_set[job_type] = {"jobs": durations[job_type]["jobs"], "ops": []}
+        ini_set[job_type] = {"jobs": durations[job_type]["jobs"], "ops": {}}
         for op in durations[job_type]["ops"]:
-            ini_set[job_type]["ops"].append(op)
             ms,processing_time = durations[job_type]["ops"][op]
+            ini_set[job_type]["ops"][op] = ms
             for m in ms:
                 if m not in machines:
                     machines.append(m)
             setattr(duration, f"{job_type}{op}", processing_time)
     machines.sort(key=lambda machine: machines_tmp.index(machine))
-
     for op_type1 in setups:
         for op_type2 in setups:
             (job_type1, op1), (job_type2, op2) = op_type1, op_type2
@@ -178,7 +233,7 @@ def main():
 
     durations = {job_type : {"jobs":[f"Job{j+1}" for j in range(rd.randint(2,max_num_job+1))], "ops":{f"Op{o+1}" : [sorted(rd.choice(machines, size=rd.randint(1, len(machines)), replace=False),key=lambda machine: machines.index(machine)),rd.randint(2, max_num_op + 1)] for o in range(rd.randint(1, max_num_op + 1))}} for job_type in job_types}
 
-    op_types = [(job_type, op) for job_type in job_types for op in durations[job_type][list(durations[job_type])[0]]]
+    op_types = [(job_type, op) for job_type in job_types for op in durations[job_type]["ops"]]
     setups = {op1:{op2:0 if op1[0] == op2[0] else rd.randint(1, max(max_time//2, 1) + 1) for op2 in op_types} for op1 in op_types}
 
     for job_type in durations.keys():
