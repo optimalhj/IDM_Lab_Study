@@ -180,8 +180,7 @@ def start_ga(duration, setup, ini_set, machines, params):
             mom, dad = rd.choice(indices, size=2, replace=False)
             offsprings.append(three_phase_decode(duration, setup, generate_offsprings(ini_set, populations[mom], populations[dad]), ini_set, machines))
 
-        children = sorted(populations + offsprings, key=lambda case:case[1])
-        populations = children[:params["pop_size"]]
+        populations = sorted(populations + offsprings, key=lambda case:case[1])[:params["pop_size"]]
         history.append(populations[0][1])
         print("Generation : ", generation + 1,"/ Best offspring :", populations[0][1], populations[0][0])
     graph_gen(history)
