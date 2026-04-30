@@ -76,6 +76,7 @@ def gene_mutation(points, chromosome):
 def generate_offsprings(ini_set, parent1, parent2):
     parents = [[(gene[0], gene[2]) for gene in parent[0]] for parent in [parent1, parent2]]
     way_offspring = rd.choice(6)
+
     if way_offspring == 0:
         points = [i for i in range(rd.randint(1, len(parents[0])))]
         return gene_crossover(points, parents[0], parents[1])
