@@ -16,21 +16,6 @@ def select_pop(populations, way_select_pop):
     else:  # Do not reach
         return 0
 
-"""
-def graph(final):
-    x = [Gen for Gen in final]
-    y = [final[Gen][0] for Gen in final]
-
-    print("Best Seq :", final[x[-1]][1])
-
-    plt.plot(x, y)
-    plt.xticks(rotation=45, fontsize=5)
-    plt.title("Makespan of FJSP")
-    plt.xlabel("Generations")
-    plt.ylabel("Tardiness")
-    plt.show()
-"""
-
 def three_phase_decode(duration, setup, chromosome, ini_set, machines):
 
     seq_o, seq_m = [], []
@@ -88,11 +73,8 @@ def gene_mutation(points, chromosome):
             chromosome[l] = insulting.pop(0)
     return chromosome
 
-def encode(decoded):
-    return [(gene[0], gene[2]) for gene in decoded]
-
 def generate_offsprings(ini_set, parent1, parent2):
-    parents = [encode(parent[0]) for parent in [parent1, parent2]]
+    parents = [[(gene[0], gene[2]) for gene in parent[0]] for parent in [parent1, parent2]]
     way_offspring = rd.choice(6)
     if way_offspring == 0:
         points = [i for i in range(rd.randint(1, len(parents[0])))]
@@ -133,17 +115,59 @@ def generate_offsprings(ini_set, parent1, parent2):
     else:  # Do not reach
         return 0
 
+def graph_gen(final):
+
+    plt.plot([f"Gen{i+1}" for i in range(len(final))], final)
+
+    plt.xticks(rotation=45, fontsize=5)
+    plt.title("Makespan of FJSP")
+
+    plt.xlabel("Gen")
+    plt.ylabel("Tardiness")
+
+    plt.show()
+
+def graph_makespan(duration, setup, best, machines):
+    seqs, makespan = best
+    _, ax = plt.subplots()
+    start_job, start_machine, op_per_machine = {}, {}, {}
+
+    for m in machines:
+        ax.barh(m, 0, left=0)
+        start_machine[m] = 0
+        op_per_machine[m] = []
+        for job_type, job, op, machine in seqs:
+            if machine == m:
+                op_per_machine[m].append((job_type, job, op))
+            if (job_type, job) not in list(start_job):
+                start_job[(job_type, job)] = 0
+
+    for job_type, job, op, m in seqs:
+        start_oper, operating = max(start_job[(job_type, job)], start_machine[m]), getattr(duration, f"{job_type}{op}")
+        ax.barh(m, operating, left=start_oper, color=plt.get_cmap('tab20', len(start_job))(list(start_job).index((job_type,job))), edgecolor='black')
+        ax.text(start_oper + operating / 2, m, f"JT{job_type[-1]}\nJ{job[-1]}\n{op}\n({operating})", va='center', ha='center', color='black', fontsize=5)
+        start_job[(job_type, job)], start_machine[m] = [start_oper + operating for _ in range(2)]
+        if op_per_machine[m].index((job_type, job, op)) != len(op_per_machine[m]) - 1:
+            next_job_type, next_job, next_op = op_per_machine[m][op_per_machine[m].index((job_type, job, op)) + 1]
+            setup_time = getattr(setup, f"{job_type}{op}{next_job_type}{next_op}")
+            start_machine[m] += setup_time
+            ax.barh(m, setup_time, left=start_machine[m] - setup_time, color='white', edgecolor='black')
+    ax.set_xticks([i for i in range(int(makespan)+2)])
+    ax.tick_params(axis='x', labelsize=5)
+    ax.set_yticks(range(len(machines)))
+    ax.set_yticklabels(machines)
+    ax.set_xlabel("Time")
+    ax.set_title("Makespan_Result")
+    plt.show()
+
 def start_ga(duration, setup, ini_set, machines, params):
+    history = []
 
-    ini_pop = []
     op_types = [(job_type, op) for job_type in ini_set for _ in ini_set[job_type]["jobs"] for op in ini_set[job_type]["ops"]]
-    for _ in range(params["pop_size"]):
-        chromosome = [op_types[i] for i in rd.choice(range(len(op_types)), size=len(op_types), replace=False)]
-        ini_pop.append(three_phase_decode(duration, setup, chromosome, ini_set, machines))
+    populations = sorted([three_phase_decode(duration, setup, [op_types[i] for i in rd.choice(range(len(op_types)), size=len(op_types), replace=False)], ini_set, machines) for _ in range(params["pop_size"])],
+                         key=lambda case:case[1])
 
-    populations = sorted(ini_pop, key=lambda case:case[1])
     for generation in range(params["num_of_gens"]):
-        print("Generation : ", generation + 1)
         mating_pool = [select_pop(populations, rd.randint(3)) for _ in range(params["mating_pool"])]
         indices = [i for i in range(len(mating_pool))]
         offsprings = []
@@ -158,8 +182,10 @@ def start_ga(duration, setup, ini_set, machines, params):
 
         children = sorted(populations + offsprings, key=lambda case:case[1])
         populations = children[:params["pop_size"]]
-        print("Best offspring :", populations[0][1], populations[0][0])
-    return populations[0]
+        history.append(populations[0][1])
+        print("Generation : ", generation + 1,"/ Best offspring :", populations[0][1], populations[0][0])
+    graph_gen(history)
+    graph_makespan(duration, setup, populations[0], machines)
 
 class Duration:
     def __init__(self): pass
@@ -190,7 +216,7 @@ def main():
 
     # Parameter Input
     params = {"pop_size": 10, "num_of_gens": 15, "mating_pool": 10, "num_offs": 8}
-    num_job_types ,max_num_job, max_num_op, num_machines, max_time = 5, 7, 4, 7, 9
+    num_job_types ,max_num_job, max_num_op, num_machines, max_time = 3, 3, 4, 4, 9
 
     job_types = [f"Job_Type{i}" for i in range(1, num_job_types + 1)]
     machines = [f"M{i}" for i in range(1, num_machines + 1)]
