@@ -157,7 +157,6 @@ def start_ga(process, setup, ini_set, machines, params):
     for generation in range(params["num_of_gens"]):
         mating_pool = [select_pop(pops) for _ in range(params["mating_pool"])]
         indices = [i for i in range(len(mating_pool))]
-        offs = []
         """
         for _ in range(len(mating_pool)//2):
             mom, dad = [indices.pop(rd.randint(len(indices))) for _ in range(2)]
@@ -165,9 +164,9 @@ def start_ga(process, setup, ini_set, machines, params):
         """
         for _ in range(params["num_offs"]):
             mom, dad = rd.choice(indices, size=2, replace=False)
-            offs.append(decode(process, setup, generate_off(ini_set, pops[mom], pops[dad]), ini_set, machines))
+            pops.append(decode(process, setup, generate_off(ini_set, mating_pool[mom], mating_pool[dad]), ini_set, machines))
 
-        pops = sorted(pops + offs, key=lambda case:case[1])[:params["pop_size"]]
+        pops = sorted(pops, key=lambda case:case[1])[:params["pop_size"]]
         history.append(pops[0][1])
         print("Generation : ", generation + 1,"/ Best offspring :", pops[0][1], pops[0][0])
     graph_gen(history)

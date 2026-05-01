@@ -17,10 +17,6 @@ def calculate(origin, operations):
         jobs[oper[0]], machines[oper[2]] = [max(jobs[oper[0]], machines[oper[2]]) + getattr(origin, f"{oper[0]}{oper[1]}{oper[2]}") for _ in range(2)]
     return max(machines.values())
 
-def versus(origin, candidates):
-    makespans = [calculate(origin, case) for case in candidates]
-    return candidates[makespans.index(min(makespans))]
-
 def generate_offsprings(origin, mom,dad,rates,machines):
     offsprings, parents = [], (mom, dad)
     way_offspring = rd.choice([i for i in range(len(rates))], size=1, p=rates, replace=False)[0]
@@ -80,38 +76,18 @@ def generate_offsprings(origin, mom,dad,rates,machines):
 
     return offsprings
 
-def select_pop(origin, popped, way_select_pop):
+def select_pop(populations):
+    indices = [i for i in range(len(populations))]
+    way_pop = rd.randint(3)
 
-    if way_select_pop == 0: # Binary tournament
-        indices, candidates = [i for i in range(len(popped))], []
+    if way_pop == 0: # Binary tournament
+        return populations[min(rd.choice(indices, size=2, replace=False),key=lambda idx: populations[idx][1])]
 
-        while len(indices) > 2:
-            candidates.append([indices.pop(rd.randint(len(indices))) for _ in range(2)])
-        candidates.append(indices)
-        new_candidates = [versus(origin, [popped[idx] for idx in candidate]) for candidate in candidates]
+    elif way_pop == 1:  # n-Size tournament
+        return populations[min(rd.choice(indices, size=rd.randint(3, max(4, int(len(indices) / 2.5))), replace=False),key=lambda idx: populations[idx][1])]
 
-        if len(new_candidates) > 1:
-            return select_pop(origin, new_candidates, 0)
-        else:
-            return new_candidates[0]
-
-    elif way_select_pop == 1: # n-Size tournament
-        indices = [i for i in range(len(popped))]
-        candidates = []
-        n_size = rd.randint(3, max(4, len(indices)//2))
-
-        while len(indices) > n_size:
-            candidates.append([indices.pop(rd.randint(len(indices))) for _ in range(n_size)])
-        candidates.append(indices)
-        new_candidates = [versus(origin, [popped[idx] for idx in candidate]) for candidate in candidates]
-        
-        if len(new_candidates) > 1:
-            return select_pop(origin, new_candidates, 1)
-        else:
-            return new_candidates[0]
-
-    elif way_select_pop == 2:  # Linear ranking
-        return popped[rd.choice([i for i in range(0, len(popped))], size=1, replace=False, p=[2 * i / (len(popped) * (len(popped) + 1)) for i in range(1, len(popped) + 1)])[0]]
+    elif way_pop == 2:  # Linear ranking
+        return populations[rd.choice(indices, size=1, p=[2 * i / (len(indices) * (len(indices) + 1)) for i in range(len(indices), 0, -1)])[0]]
 
     else:  # Do not reach
         return 0
@@ -201,9 +177,10 @@ def initial_pop(origin, ini_set, machines, assign, seq):
         set_tmp = 0
     return set_tmp
 
-def graph_gen(final):
-
-    plt.plot(list(final), [final[g][0] for g in final])
+def graph_gen(origin, history):
+    history_gen = [f"Gen {i+1}" for i in range(len(history))]
+    history_makespan = [calculate(origin, his) for his in history]
+    plt.plot(history_gen, history_makespan)
 
     plt.xticks(rotation=45, fontsize=5)
     plt.title("Makespan of FJSP")
@@ -212,8 +189,9 @@ def graph_gen(final):
     plt.ylabel("Tardiness")
 
     plt.show()
+    return history_makespan[-1], history[-1]
 
-def graph_makespan(origin, seqs, machines):
+def graph_makespan(origin, obj, seqs, machines):
     _, ax = plt.subplots()
     start_job, start_machine = {}, {}
     for job, _, _ in seqs:
@@ -226,7 +204,9 @@ def graph_makespan(origin, seqs, machines):
         start_oper, operating = max(start_job[job], start_machine[m]), getattr(origin, f"{job}{op}{m}")
         ax.barh(m, operating, left=start_oper, color=plt.get_cmap('tab20', len(start_job))(list(start_job).index(job)), edgecolor='black')
         ax.text(start_oper + operating / 2, m, f"{job}\n{op}\n{m}\n({operating})", va='center', ha='center', color='black', fontsize=7)
-        start_job[job], start_machine[m] = [start_oper + operating for _ in range(2)] 
+        start_job[job], start_machine[m] = [start_oper + operating for _ in range(2)]
+    ax.set_xticks([i for i in range(int(obj) + 2)])
+    ax.tick_params(axis='x', labelsize=5)
     ax.set_yticks(range(len(machines)))
     ax.set_yticklabels(machines)
     ax.set_xlabel("Time")
@@ -234,29 +214,22 @@ def graph_makespan(origin, seqs, machines):
     plt.show()
 
 def ga(origin, ini_set, machines, params):
+    history = []
+    pops = sorted([initial_pop(origin, ini_set, machines, assign=params["ini_assign"], seq=params["ini_seq"]) for _ in range(params["pop_size"])], key=lambda case: calculate(origin, case))
 
-    ini_pop = sorted([initial_pop(origin, ini_set, machines, assign=params["ini_assign"], seq=params["ini_seq"])
-               for _ in range(params["pop_size"])], key=lambda case: calculate(origin, case))
-
-    generations, best_child, horizon = {}, 0, 9999999
     for Gen in range(1, params["num_of_gens"] + 1):
-        offsprings = []
+        mating_pool = [select_pop(pops) for _ in range(params["pop_size"])]
+        indices, offs = [i for i in range(len(mating_pool))], []
 
         for _ in range(params["pop_size"]):
-            mother, father = [versus(origin, [select_pop(origin, ini_pop, rd.randint(3)) for _ in range(params["pop_size"])]) for _ in range(2)]
-            offspring = generate_offsprings(origin, mother, father, params["crossover"], machines)
-            offsprings.extend(offspring)
-        candidate = versus(origin, offsprings)
-        score_candidate = calculate(origin, candidate)
+            mom, dad = rd.choice(indices, size=2, replace=False)
+            offspring = generate_offsprings(origin, mating_pool[mom], mating_pool[dad], params["crossover"], machines)
+            offs.extend(offspring)
 
-        if score_candidate < horizon:
-            horizon, best_child = score_candidate, candidate
+        pops = sorted(pops + offs, key=lambda case: calculate(origin, case))[0:params["pop_size"]]
+        history.append(pops[0])
 
-        generations[f"Gen {Gen}"] = horizon, best_child
-
-        ini_pop = sorted(ini_pop + offsprings, key=lambda case: calculate(origin, case))[0:params["pop_size"]]
-    graph_gen(generations)
-    return generations[f"Gen {params["num_of_gens"]}"]
+    return graph_gen(origin, history)
 
 class Build:
     def __init__(self):
@@ -280,7 +253,7 @@ def start(built_parameter):
     print("Total Makespan :", result_obj)
     print("Best Sequence :")
     print(result_seq)
-    graph_makespan(original, result_seq, machines)
+    graph_makespan(original, result_obj, result_seq, machines)
 
 def main():
 
