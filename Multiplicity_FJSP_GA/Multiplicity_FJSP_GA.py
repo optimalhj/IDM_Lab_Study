@@ -12,7 +12,7 @@ def select_pop(populations):
         return populations[min(rd.choice(indices, size=rd.randint(3, max(4, int(len(indices)/2.5))), replace=False), key=lambda idx : populations[idx][1])]
 
     elif way_pop == 2:  # Linear ranking
-        return populations[rd.choice(indices, size=1, p=[2 * i / (len(indices) * (len(indices) + 1)) for i in range(1, len(indices) + 1)])[0]]
+        return populations[rd.choice(indices, size=1, p=[2 * i / (len(indices) * (len(indices) + 1)) for i in range(len(indices), 0 , -1)])[0]]
 
     else:  # Do not reach
         return 0
