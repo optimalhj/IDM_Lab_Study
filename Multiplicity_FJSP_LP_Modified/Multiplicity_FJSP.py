@@ -38,9 +38,11 @@ def makespan(origin, ini_set, machines):
                 md.addConstr(sum(binary_space[job_type][job][op].values()) == 1)
 
     for machine in machines:
+
         for i in range(len(total_operation)):
             ith_op = total_operation[i]
             seq_machine[ith_op] = {}
+
             for j in range(i + 1, len(total_operation)):
                 jth_op = total_operation[j]
                 seq_machine[ith_op][jth_op] = md.addVar(vtype=GRB.BINARY)
@@ -51,50 +53,56 @@ def makespan(origin, ini_set, machines):
     md.addGenConstrMax(z, [start_end_each_job[job_type][job][operation][machine][1] for job_type in ini_set for job in ini_set[job_type]["jobs"] for operation in ini_set[job_type]["operations"] for machine in machines])
     md.setObjective(z, GRB.MINIMIZE)
     md.optimize()
-    '''
-    for job_type in binary_space:
+
+    for job_type in ini_set:
         print(job_type)
-        for job in binary_space[job_type]:
+        for job in ini_set[job_type]["jobs"]:
             print("\t", job)
-            for op in binary_space[job_type][job]:
+            for op in ini_set[job_type]["operations"]:
                 print("\t\t", op, ":", end=" ")
-                for machine in binary_space[job_type][job][op]:
+                for machine in machines:
                     print(machine, ":", int(binary_space[job_type][job][op][machine].X) * getattr(origin, f"{job_type}{job}{op}{machine}"), end=" / ")
                 print()
     print("-----------------------------------------------------------------------------------------------------")
-    for job_type in binary_space:
+    for job_type in ini_set:
         print(job_type)
-        for job in binary_space[job_type]:
+        for job in ini_set[job_type]["jobs"]:
             print("\t", job)
-            for op in binary_space[job_type][job]:
+            for op in ini_set[job_type]["operations"]:
                 print("\t\t", op, ":", end=" ")
-                for machine in binary_space[job_type][job][op]:
-                    print(machine, ":", "(Start :", int(binary_space[job_type][job][op][machine][0].X), "End :", int(binary_space[job_type][job][op][machine][1].X), end=") / ")
+                for machine in machines:
+                    print(machine, ":", "(Start :", int(start_end_each_job[job_type][job][op][machine][0].X), "End :", int(start_end_each_job[job_type][job][op][machine][1].X), end=") / ")
                 print()
     print("-----------------------------------------------------------------------------------------------------")
-    '''
+
+    for_print, colors_info = [], []
     fig, ax = plt.subplots()
-    colors_info = [(job_type, job) for job_type, job, _ in total_operation]
-    for job_type in ini_set:
-        for job in ini_set[job_type]["jobs"]:
-            for operation in ini_set[job_type]["operations"]:
-                for machine in machines:
-                    if binary_space[job_type][job][operation][machine].X != 0:
-                        start_info, end_info = [time_info.X for time_info in start_end_each_job[job_type][job][operation][machine]]
+    for job_type, job, _ in total_operation:
+        if (job_type, job) not in colors_info:
+            colors_info.append((job_type, job))
+    for machine in machines:
+        ax.barh(machine, 0, left=0)
+        for job_type in ini_set:
+            for job in ini_set[job_type]["jobs"]:
+                for op in ini_set[job_type]["operations"]:
+                    if round(binary_space[job_type][job][op][machine].X) != 0:
+                        start_info, end_info = [time_info.X for time_info in start_end_each_job[job_type][job][op][machine]]
                         ax.barh(machine, end_info - start_info, left=start_info, color=plt.get_cmap('tab20', len(colors_info))(colors_info.index((job_type, job))), edgecolor='black')
-                        ax.text((start_info + end_info) / 2, machine,f"{job_type}\n{job}\n{operation}\n({getattr(origin, f"{job_type}{job}{operation}{machine}")})", va='center', ha='center', color='black', fontsize=7)
+                        ax.text((start_info + end_info) / 2, machine,f"{job_type}\n{job}\n{op}\n({getattr(origin, f"{job_type}{job}{op}{machine}")})", va='center', ha='center', color='black', fontsize=7)
+                        for_print.append((job_type, job, op, machine))
+    for_print.sort(key=lambda attr:start_end_each_job[attr[0]][attr[1]][attr[2]][attr[3]][0].X)
     ax.set_yticks(range(len(machines)))
     ax.set_yticklabels(machines)
     ax.set_xlabel("Time")
     ax.set_title("Makespan_Result")
     plt.show()
-    return md.ObjVal
+    return md.ObjVal, for_print
 
 class Build:
     def __init__(self):
         pass
-def start():
-    """
+def main():
+
     # Parameter Input
     the_number_of_job_types = 3
     the_maximal_number_of_job = 3
@@ -110,73 +118,7 @@ def start():
     machines = [f"M{i}" for i in range(1,the_number_of_machines + 1)]
 
     built_parameter = {job_type : {f"Job{i+1}" : {f"OP{j+1}" : {machine:random.randint(1,max_time+1) for machine in machines} for j in range(num_op_of_type[job_type])} for i in range(num_job_of_type[job_type])} for job_type in job_types}
-    """
 
-    built_parameter = {
-        "Job_Type1" : {
-            "Job1" : {
-                'OP1': {'M1': 2, 'M2': 5, 'M3': 1, 'M4': 5, 'M5': 9}, 'OP2': {'M1': 9, 'M2': 2, 'M3': 9, 'M4': 5, 'M5': 2},
-                'OP3': {'M1': 5, 'M2': 3, 'M3': 1, 'M4': 9, 'M5': 6}, 'OP4': {'M1': 5, 'M2': 5, 'M3': 1, 'M4': 6, 'M5': 3}},
-            "Job2" : {
-                'OP1': {'M1': 8, 'M2': 6, 'M3': 1, 'M4': 9, 'M5': 8}, 'OP2': {'M1': 4, 'M2': 6, 'M3': 3, 'M4': 5, 'M5': 1},
-                'OP3': {'M1': 2, 'M2': 3, 'M3': 9, 'M4': 8, 'M5': 1}, 'OP4': {'M1': 3, 'M2': 3, 'M3': 6, 'M4': 4, 'M5': 7}},
-            "Job3" : {
-                'OP1': {'M1': 3, 'M2': 9, 'M3': 4, 'M4': 2, 'M5': 2}, 'OP2': {'M1': 8, 'M2': 4, 'M3': 2, 'M4': 6, 'M5': 9},
-                'OP3': {'M1': 6, 'M2': 4, 'M3': 6, 'M4': 4, 'M5': 3}, 'OP4': {'M1': 6, 'M2': 6, 'M3': 5, 'M4': 7, 'M5': 3}}},
-        "Job_Type2" : {
-            "Job1" : {
-                'OP1': {'M1': 2, 'M2': 1, 'M3': 4, 'M4': 7, 'M5': 9}, 'OP2': {'M1': 5, 'M2': 8, 'M3': 7, 'M4': 8, 'M5': 5},
-                'OP3': {'M1': 6, 'M2': 8, 'M3': 6, 'M4': 2, 'M5': 2}, 'OP4': {'M1': 7, 'M2': 8, 'M3': 7, 'M4': 6, 'M5': 9}}},
-        "Job_Type3" : {
-            "Job1" : {
-                'OP1': {'M1': 3, 'M2': 2, 'M3': 8, 'M4': 2, 'M5': 4}, 'OP2': {'M1': 3, 'M2': 6, 'M3': 1, 'M4': 5, 'M5': 2},
-                'OP3': {'M1': 8, 'M2': 7, 'M3': 3, 'M4': 6, 'M5': 7}, 'OP4': {'M1': 1, 'M2': 3, 'M3': 5, 'M4': 7, 'M5': 2},
-                'OP5': {'M1': 3, 'M2': 8, 'M3': 2, 'M4': 2, 'M5': 5}},
-            "Job2" : {
-                'OP1': {'M1': 6, 'M2': 2, 'M3': 2, 'M4': 6, 'M5': 5}, 'OP2': {'M1': 2, 'M2': 4, 'M3': 5, 'M4': 6, 'M5': 7},
-                'OP3': {'M1': 8, 'M2': 5, 'M3': 2, 'M4': 8, 'M5': 9}, 'OP4': {'M1': 7, 'M2': 9, 'M3': 3, 'M4': 8, 'M5': 1},
-                'OP5': {'M1': 5, 'M2': 8, 'M3': 6, 'M4': 8, 'M5': 6}}}}
-
-    """
-    built_parameter = {
-        "Job_Type1" : {
-            "Job1" : {
-                'OP1': {'M1': 4, 'M2': 1, 'M3': 5, 'M4': 2, 'M5': 7}, 'OP2': {'M1': 2, 'M2': 2, 'M3': 8, 'M4': 6, 'M5': 9},
-                'OP3': {'M1': 3, 'M2': 5, 'M3': 4, 'M4': 3, 'M5': 8}, 'OP4': {'M1': 3, 'M2': 6, 'M3': 7, 'M4': 4, 'M5': 2}},
-	        "Job2" : {
-                'OP1': {'M1': 8, 'M2': 1, 'M3': 3, 'M4': 8, 'M5': 4}, 'OP2': {'M1': 6, 'M2': 1, 'M3': 2, 'M4': 8, 'M5': 4},
-                'OP3': {'M1': 9, 'M2': 7, 'M3': 5, 'M4': 6, 'M5': 3}, 'OP4': {'M1': 8, 'M2': 7, 'M3': 5, 'M4': 3, 'M5': 8}}},
-        "Job_Type2" : {
-	        "Job1" : {
-                'OP1': {'M1': 7, 'M2': 6, 'M3': 9, 'M4': 7, 'M5': 5}, 'OP2': {'M1': 5, 'M2': 7, 'M3': 6, 'M4': 6, 'M5': 5},
-                'OP3': {'M1': 7, 'M2': 8, 'M3': 3, 'M4': 5, 'M5': 1}, 'OP4': {'M1': 7, 'M2': 1, 'M3': 8, 'M4': 9, 'M5': 5}},
-	        "Job2" : {
-                'OP1': {'M1': 6, 'M2': 4, 'M3': 1, 'M4': 6, 'M5': 1}, 'OP2': {'M1': 1, 'M2': 8, 'M3': 8, 'M4': 1, 'M5': 5},
-                'OP3': {'M1': 6, 'M2': 9, 'M3': 8, 'M4': 2, 'M5': 5}, 'OP4': {'M1': 6, 'M2': 4, 'M3': 5, 'M4': 9, 'M5': 8}},
-	        "Job3" : {
-                'OP1': {'M1': 6, 'M2': 2, 'M3': 6, 'M4': 8, 'M5': 2}, 'OP2': {'M1': 2, 'M2': 5, 'M3': 5, 'M4': 7, 'M5': 5},
-                'OP3': {'M1': 1, 'M2': 5, 'M3': 3, 'M4': 7, 'M5': 4}, 'OP4': {'M1': 1, 'M2': 6, 'M3': 3, 'M4': 3, 'M5': 8}}},
-        "Job_Type3" : {
-            "Job1" : {
-                'OP1': {'M1': 5, 'M2': 7, 'M3': 8, 'M4': 9, 'M5': 7}, 'OP2': {'M1': 6, 'M2': 8, 'M3': 4, 'M4': 9, 'M5': 7}},
-	        "Job2" : {
-                'OP1': {'M1': 8, 'M2': 9, 'M3': 1, 'M4': 1, 'M5': 5}, 'OP2': {'M1': 1, 'M2': 7, 'M3': 7, 'M4': 7, 'M5': 8}},
-            "Job3" : {
-                'OP1': {'M1': 8, 'M2': 7, 'M3': 1, 'M4': 2, 'M5': 3}, 'OP2': {'M1': 3, 'M2': 9, 'M3': 8, 'M4': 4, 'M5': 1}}}}
-    """
-    """
-    built_parameter = {
-        "Job_Type1" : {
-            "Job1" : {
-                'OP1': {'M1': 4, 'M2': 3, 'M3': 4, 'M4': 7, 'M5': 8}, 'OP2': {'M1': 9, 'M2': 4, 'M3': 4, 'M4': 2, 'M5': 6},
-                'OP3': {'M1': 2, 'M2': 2, 'M3': 2, 'M4': 4, 'M5': 6}, 'OP4': {'M1': 6, 'M2': 5, 'M3': 7, 'M4': 8, 'M5': 5}},
-            "Job2" : {
-                'OP1': {'M1': 4, 'M2': 7, 'M3': 8, 'M4': 3, 'M5': 6}, 'OP2': {'M1': 4, 'M2': 4, 'M3': 1, 'M4': 3, 'M5': 8},
-                'OP3': {'M1': 1, 'M2': 2, 'M3': 8, 'M4': 8, 'M5': 8}, 'OP4': {'M1': 4, 'M2': 6, 'M3': 8, 'M4': 7, 'M5': 9}},
-            "Job3" : {
-                'OP1': {'M1': 8, 'M2': 4, 'M3': 8, 'M4': 4, 'M5': 3}, 'OP2': {'M1': 2, 'M2': 2, 'M3': 2, 'M4': 6, 'M5': 6},
-                'OP3': {'M1': 5, 'M2': 5, 'M3': 2, 'M4': 6, 'M5': 4}, 'OP4': {'M1': 6, 'M2': 8, 'M3': 3, 'M4': 3, 'M5': 3}}}}
-    """
     for job_type in built_parameter.keys():
         print(job_type)
         for job in built_parameter[job_type]:
@@ -200,8 +142,9 @@ def start():
                     setattr(original, f"{job_type}{job}{op}{machine}", built_parameter[job_type][job][op][machine])
                     if machine not in machines:
                         machines.append(machine)
-    good_seq = makespan(original, ini_set, machines)
-    return good_seq
+    result_obj, result_seq = makespan(original, ini_set, machines)
+    print("Total Makespan :", result_obj)
+    print("Seq :\n", result_seq)
 
 if __name__ == "__main__":
-    print(start())
+    main()
