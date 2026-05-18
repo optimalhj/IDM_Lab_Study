@@ -20,10 +20,10 @@ def select_pop(populations):
 def decode(process, setup, chrom, ini_set, machines):
 
     seq_o, seq_m = [], []
-    count = {gene : 1 for gene in chrom}
+    count = {gene : 0 for gene in chrom}
 
     for l in range(len(chrom)):
-        seq_o.append((ini_set[chrom[l][0]]["jobs"][count[chrom[l]]-1],chrom[l]))
+        seq_o.append((ini_set[chrom[l][0]]["jobs"][count[chrom[l]]],chrom[l]))
         count[chrom[l]] += 1
 
     for jt in ini_set:
@@ -106,7 +106,7 @@ def graph_gen(final):
 
     plt.plot([f"Gen{i+1}" for i in range(len(final))], final)
 
-    plt.xticks(rotation=45, fontsize=5)
+    plt.xticks(rotation=45, fontsize=0.5)
     plt.title("Makespan of FJSP")
 
     plt.xlabel("Gen")
@@ -157,15 +157,15 @@ def start_ga(process, setup, ini_set, machines, params):
     for generation in range(params["num_of_gens"]):
         mating_pool = [select_pop(pops) for _ in range(params["mating_pool"])]
         indices = [i for i in range(len(mating_pool))]
-        """
+
         for _ in range(len(mating_pool)//2):
             mom, dad = [indices.pop(rd.randint(len(indices))) for _ in range(2)]
-            offs.append(decode(process, setup, generate_off(ini_set, pops[mom], pops[dad]), ini_set, machines))
+            pops.append(decode(process, setup, generate_off(ini_set, pops[mom], pops[dad]), ini_set, machines))
         """
         for _ in range(params["num_offs"]):
             mom, dad = rd.choice(indices, size=2, replace=False)
             pops.append(decode(process, setup, generate_off(ini_set, mating_pool[mom], mating_pool[dad]), ini_set, machines))
-
+        """
         pops = sorted(pops, key=lambda case:case[1])[:params["pop_size"]]
         history.append(pops[0][1])
         print("Generation : ", generation + 1,"/ Best offspring :", pops[0][1], pops[0][0])
@@ -200,7 +200,9 @@ def start(processes, setups, machines_tmp, params):
 def main():
 
     # Parameter Input
-    params = {"pop_size": 10, "num_of_gens": 15, "mating_pool": 10, "num_offs": 8}
+    params = {"pop_size": 100, "num_of_gens": 5, "mating_pool": 100, "num_offs": 200}
+    params["pop_size"] = max(3,params["pop_size"])
+    params["mating_pool"] = min(params["pop_size"], params["mating_pool"])
     num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 3, 4, 4, 9
 
     jts = [f"Job_Type{i}" for i in range(1, num_jts + 1)]
@@ -219,7 +221,15 @@ def main():
             print("\t", end="")
             print(processes[jt][job])
         print()
-    print("-----------------------------------------------------------------------------------------------------")
+
+    for op1 in setups.keys():
+        print(op1," -> ", end="")
+        for op2 in setups[op1]:
+            if setups[op1][op2] != 0:
+                print(f"{op2}({setups[op1][op2]})", end=" / ")
+        print()
+
+    print("\n-----------------------------------------------------------------------------------------------------")
 
     start(processes, setups, machines, params)
 
