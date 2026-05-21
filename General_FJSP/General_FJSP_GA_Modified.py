@@ -24,8 +24,7 @@ def generate_offs(og, pr1, pr2, rates, ms):
         fixed_job = jobs[rd.randint(len(jobs))]
         fixed_oper, off = [oper for oper in pr2 if oper[0] != fixed_job], []
         for idx in range(len(pr1)):
-            if pr1[idx][0] == fixed_job: off.append(pr1[idx])
-            else: off.append(fixed_oper.pop(0))
+            off.append(pr1[idx] if pr1[idx][0] else fixed_oper.pop(0))
     elif way_off == 1: # Assignment_crossover
         idx1, idx2 = sorted(rd.choice([i for i in range(len(pr1))], size=2, replace=False))
         off = pr1[0:idx1] + [(pr1[idx1][0], pr1[idx1][1], pr2[idx1][2])] + pr1[

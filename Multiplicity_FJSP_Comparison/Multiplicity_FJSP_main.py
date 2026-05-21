@@ -16,7 +16,7 @@ def start(durations,setups,machines):
 
 def main():
 
-    num_comparison = 100
+    num_comparison = 10
     # Parameter Input
     num_job_types = 2
     max_num_job = 3
