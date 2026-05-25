@@ -1,4 +1,5 @@
 from numpy import random as rd
+import matplotlib.pyplot as plt
 
 def select_pop(populations):
     indices = [i for i in range(len(populations))]
@@ -78,7 +79,6 @@ def second_stage(process, setup, ini_set, machines, pr1, pr2):
 
     elif way_off == 2:
         seq = list(pr1)
-        print(seq[0])
         for l in range(len(seq)):
             jt_1, job_1, op_1= seq[l][0], seq[l][1], seq[l][2]
             for jt_2, job_2, op_2, m_2 in pr2:
@@ -102,7 +102,6 @@ def second_stage(process, setup, ini_set, machines, pr1, pr2):
 
         ops_machine[m].append((jt, job, op))
         st_machine[m], st_job[jt][job] = [now + getattr(process, f"{jt}{op}") for _ in range(2)]
-    print(seq)
     return seq, max(st_machine.values())
 
 def generate_off(ini_set, pr1, pr2):
@@ -130,24 +129,63 @@ def generate_off(ini_set, pr1, pr2):
 
     else:  # Do not reach
         return 0
+def graph_gen(final):
+
+    plt.plot([f"Gen{i+1}" for i in range(len(final))], final)
+
+    plt.xticks(rotation=45, fontsize=0.5)
+    plt.title("Makespan of FJSP")
+
+    plt.xlabel("Gen")
+    plt.ylabel("Tardiness")
+
+    plt.show()
+
+def graph_makespan(process, setup, best, machines):
+    seqs, makespan = best
+    _, ax = plt.subplots()
+    s_job, s_machine, m_tmp = {}, {}, {}
+    print(seqs)
+    for m in machines:
+        ax.barh(m, 0, left=0)
+        s_machine[m] = 0
+        m_tmp[m] = []
+        for jt, job, op, machine in seqs:
+            if machine == m:
+                m_tmp[m].append((jt, job, op))
+            if (jt, job) not in list(s_job):
+                s_job[(jt, job)] = 0
+    print(m_tmp)
+    for jt, job, op, m in seqs:
+        if m_tmp[m].index((jt, job, op)) == 0:
+            start_oper = max(s_job[(jt, job)], s_machine[m])
+        else:
+            prior_jt, _, prior_op = m_tmp[m][m_tmp[m].index((jt, job, op)) - 1]
+            set_t = getattr(setup, f"{prior_jt}{prior_op}{jt}{op}")
+            start_oper = max(s_job[(jt, job)], s_machine[m] + set_t)
+            ax.barh(m, set_t, left=start_oper - set_t, color='white', edgecolor='black')
+        operating = getattr(process, f"{jt}{op}")
+        ax.barh(m, operating, left=start_oper, color=plt.get_cmap('tab20', len(s_job))(list(s_job).index((jt,job))), edgecolor='black')
+        ax.text(start_oper + operating / 2, m, f"{jt}\n{job}\n{op}\n({operating})", va='center', ha='center', color='black', fontsize=5)
+        s_job[(jt, job)], s_machine[m] = [start_oper + operating for _ in range(2)]
+
+    ax.set_xticks([i for i in range(int(makespan)+2)])
+    ax.tick_params(axis='x', labelsize=5)
+    ax.set_yticks(range(len(machines)))
+    ax.set_yticklabels(machines)
+    ax.set_xlabel("Time")
+    ax.set_title("Makespan_Result")
+    plt.show()
 
 def ga(process, setup, ini_set, machines, params):
     history = []
     ini_pop = [[jt, job, op] for jt in ini_set.keys() for job in ini_set[jt]["jobs"] for op in ini_set[jt]["ops"]]
     pops = sorted([first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, rd.permutation(ini_pop))) for _ in range(params["pop_size"])], key=lambda case:case[1])
-    print(len(ini_pop))
     for gen in range(params["num_of_gens"]):
         mating_pool = [select_pop(pops) for _ in range(params["mating_pool"])]
-        print("Mating_pool")
-        for case in mating_pool:
-            print("\t", case)
-
         indices = list(range(len(mating_pool)))
         for _ in range(len(mating_pool) // 2):
             mom, dad = [indices.pop(rd.randint(len(indices))) for _ in range(2)]
-            print(f"Each member : {mom}, {dad}")
-            print("\t", mating_pool[mom][0])
-            print("\t", mating_pool[dad][0])
             pops.append(second_stage(process, setup, ini_set, machines, mating_pool[mom][0], mating_pool[dad][0]))
         """
         for _ in range(params["num_offs"]):
@@ -156,6 +194,8 @@ def ga(process, setup, ini_set, machines, params):
         """
         pops = sorted(pops, key=lambda case:case[1])[:params["pop_size"]]
         history.append(pops[0][1])
+    graph_gen(history)
+    graph_makespan(process, setup, pops[0], machines)
     print(history)
 
 
@@ -187,8 +227,8 @@ def start(processes, setups, machines_tmp, params):
 def main():
 
     # Parameter Input
-    params = {"pop_size": 3, "num_of_gens": 5, "mating_pool": 5, "num_offs": 200}
-    num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 4, 4, 4, 9
+    params = {"pop_size": 100, "num_of_gens": 300, "mating_pool": 200, "num_offs": 200}
+    num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 5, 4, 4, 9
 
     jts = [f"Job_Type{i}" for i in range(1, num_jts + 1)]
     machines = [f"M{i}" for i in range(1, num_machines + 1)]
