@@ -43,9 +43,9 @@ def main():
 
     for i in range(num_iteration):
         candidates = [neighborhood(using_set[0], tabu_space) for _ in range(num_trial)]
-        for candidate in candidates:
-            candidate_set, idx1, idx2 = candidate
-            candidates[candidates.index(candidate)] = candidate_set, tardiness(candidate_set, attr), int(idx1), int(idx2)
+        for cand in range(len(candidates)):
+            candidate_set, idx1, idx2 = candidates[cand]
+            candidates[cand] = candidate_set, tardiness(candidate_set, attr), int(idx1), int(idx2)
         best_cand = min(candidates, key=lambda case:case[1])
         print("Current :", using_set)
         print("Bestset :", best_set)
@@ -55,7 +55,7 @@ def main():
             best_set, using_set = [(best_cand[0], best_cand[1]) for _ in range(2)]
             print("Improved and New Tabu", tabu_space)
         else:
-            if (best_cand[2], best_cand[3]) not in tabu_space:
+            if (best_cand[2], best_cand[3]) not in [(idx1, idx2) for idx1, idx2, _ in tabu_space]:
                 tabu_space.append([best_cand[2], best_cand[3], tabu_window])
                 using_set = best_cand[0], best_cand[1]
                 print("Not improved, new current", tabu_space)
