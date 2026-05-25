@@ -151,19 +151,17 @@ def graph_makespan(process, setup, best, machines):
         s_machine[m] = 0
         m_tmp[m] = []
         for jt, job, op, machine in seqs:
-            if machine == m:
-                m_tmp[m].append((jt, job, op))
             if (jt, job) not in list(s_job):
                 s_job[(jt, job)] = 0
-    print(m_tmp)
     for jt, job, op, m in seqs:
-        if m_tmp[m].index((jt, job, op)) == 0:
+        if len(m_tmp[m]) == 0:
             start_oper = max(s_job[(jt, job)], s_machine[m])
         else:
-            prior_jt, _, prior_op = m_tmp[m][m_tmp[m].index((jt, job, op)) - 1]
+            prior_jt, prior_op = m_tmp[m]
             set_t = getattr(setup, f"{prior_jt}{prior_op}{jt}{op}")
             start_oper = max(s_job[(jt, job)], s_machine[m] + set_t)
             ax.barh(m, set_t, left=start_oper - set_t, color='white', edgecolor='black')
+        m_tmp[m] = (jt, op)
         operating = getattr(process, f"{jt}{op}")
         ax.barh(m, operating, left=start_oper, color=plt.get_cmap('tab20', len(s_job))(list(s_job).index((jt,job))), edgecolor='black')
         ax.text(start_oper + operating / 2, m, f"{jt}\n{job}\n{op}\n({operating})", va='center', ha='center', color='black', fontsize=5)
@@ -227,7 +225,7 @@ def start(processes, setups, machines_tmp, params):
 def main():
 
     # Parameter Input
-    params = {"pop_size": 100, "num_of_gens": 300, "mating_pool": 200, "num_offs": 200}
+    params = {"pop_size": 15, "num_of_gens": 20, "mating_pool": 15, "num_offs": 15}
     num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 5, 4, 4, 9
 
     jts = [f"Job_Type{i}" for i in range(1, num_jts + 1)]
