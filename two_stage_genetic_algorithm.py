@@ -2,7 +2,7 @@ from numpy import random as rd
 import matplotlib.pyplot as plt
 
 def select_pop(populations):
-    indices = [i for i in range(len(populations))]
+    indices = list(range(len(populations)))
     way_pop = rd.randint(3)
 
     if way_pop == 0:  # Binary tournament
@@ -60,17 +60,16 @@ def first_stage(process, setup, ini_set, machines, seq):
         jt, job, op = seq[l]
         eligible_m = ini_set[jt]["ops"][op]
 
-        now = [max(st_machine[m], st_job[jt][job]) if len(ops_machine[m]) == 0 else max(st_machine[m] + getattr(setup, f"{ops_machine[m][-1][0]}{ops_machine[m][-1][2]}{jt}{op}"), st_job[jt][job]) for m in eligible_m]
+        now = [max(st_machine[m], st_job[jt][job]) if len(ops_machine[m]) == 0 else max(st_machine[m] + getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}"), st_job[jt][job]) for m in eligible_m]
         real_now = min(now)
         select_m = eligible_m[now.index(real_now)]
-        ops_machine[select_m].append((jt, job, op))
+        ops_machine[select_m] = (jt, op)
         st_machine[select_m], st_job[jt][job] = [real_now + getattr(process, f"{jt}{op}") for _ in range(2)]
         seq[l] = [jt, job, op, select_m]
     return tuple(seq), max(st_machine.values())
 
 def second_stage(process, setup, ini_set, machines, pr1, pr2):
-    way_off = rd.choice(3)
-
+    way_off = rd.randint(3)
     if way_off == 0:  # SCO : Single-Point Crossover Operator
         seq = crossover([i for i in range(rd.randint(1, len(pr1)))], pr1, pr2)
 
@@ -78,14 +77,14 @@ def second_stage(process, setup, ini_set, machines, pr1, pr2):
         seq = crossover([l for l in range(len(pr1)) if pr1[l][0] in rd.choice(list(ini_set), size=1)], pr1, pr2)
 
     elif way_off == 2:
-        seq = list(pr1)
+        seq = [list(gene) for gene in pr1]
         for l in range(len(seq)):
-            jt_1, job_1, op_1= seq[l][0], seq[l][1], seq[l][2]
+            jt_1, job_1, op_1 = seq[l][0], seq[l][1], seq[l][2]
             for jt_2, job_2, op_2, m_2 in pr2:
                 if jt_1 == jt_2 and job_1 == job_2 and op_1 == op_2:
                     seq[l][3] = m_2
                     break
-
+        seq = tuple(seq)
     else:
         seq = 0
 
@@ -96,39 +95,48 @@ def second_stage(process, setup, ini_set, machines, pr1, pr2):
     st_job = {jt: {job: 0 for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
     for l in range(len(seq)):
         jt, job, op, m = seq[l]
-
-        now = max(st_machine[m], st_job[jt][job]) if len(ops_machine[m]) == 0\
-            else max(st_machine[m] + getattr(setup, f"{ops_machine[m][-1][0]}{ops_machine[m][-1][2]}{jt}{op}"), st_job[jt][job])
-
-        ops_machine[m].append((jt, job, op))
+        print("Selected :", jt, job, op, m)
+        if len(ops_machine[m]) == 0:
+            now = max(st_machine[m], st_job[jt][job])
+            print(f"Machine {m} 기준 : {st_machine[m]}  /  작업({jt}, {job}) 기준 : {st_job[jt][job]} --> 현재시점 : {now}")
+        else:
+            now = max(st_machine[m] + getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}"), st_job[jt][job])
+            print(f"Machine {m} 기준 : {st_machine[m]} + Setup(({ops_machine[m][0]},{ops_machine[m][1]}) -> ({jt},{op})({getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}")}) = {now} /  작업({jt}, {job}) 기준 : {st_job[jt][job]} --> 현재시점 : {now}")
+        ops_machine[m] = (jt, op)
         st_machine[m], st_job[jt][job] = [now + getattr(process, f"{jt}{op}") for _ in range(2)]
+        print(f"작업 시간 : {getattr(process, f"{jt}{op}")} --> 작업 완료 시간 : {st_machine[m]}")
+        print(f"Machine 별")
+        for m in machines:
+            print(f"\t{m} : {st_machine[m]}")
+        print()
     return seq, max(st_machine.values())
 
-def generate_off(ini_set, pr1, pr2):
-    way_off = rd.choice(6)
+# def generate_off(ini_set, pr1, pr2):
+#     way_off = rd.choice(6)
+#
+#     if way_off == 1: # JCO : Job Crossover Operator
+#         points = []
+#         r_jts = {jt : rd.randint(len(ini_set[jt]["jobs"])) for jt in ini_set.keys()}
+#         for l in range(len(pr1)):
+#             if r_jts[pr1[l][0]] > 0:
+#                 points.append(l)
+#                 r_jts[pr1[l][0]] -= 1
+#         return crossover(points, pr1, pr2)
+#
+#     elif way_off == 3:
+#         return mutation(rd.choice([i for i in range(len(pr1))], size=rd.randint(3, len(list(pr1))), replace=False), pr1)
+#
+#     elif way_off == 4:
+#         rd_type = list(ini_set)[rd.randint(len(list(ini_set)))]
+#         return mutation([l for l in range(len(pr1)) if rd_type == pr1[l][0]], pr1)
+#
+#     elif way_off == 5:
+#         rd_types = rd.choice(list(ini_set), size=rd.randint(2, len(list(ini_set))), replace=False)
+#         return mutation([l for l in range(len(pr1)) if pr1[l][0] in rd_types], pr1)
+#
+#     else:  # Do not reach
+#         return 0
 
-    if way_off == 1: # JCO : Job Crossover Operator
-        points = []
-        r_jts = {jt : rd.randint(len(ini_set[jt]["jobs"])) for jt in ini_set.keys()}
-        for l in range(len(pr1)):
-            if r_jts[pr1[l][0]] > 0:
-                points.append(l)
-                r_jts[pr1[l][0]] -= 1
-        return crossover(points, pr1, pr2)
-
-    elif way_off == 3:
-        return mutation(rd.choice([i for i in range(len(pr1))], size=rd.randint(3, len(list(pr1))), replace=False), pr1)
-
-    elif way_off == 4:
-        rd_type = list(ini_set)[rd.randint(len(list(ini_set)))]
-        return mutation([l for l in range(len(pr1)) if rd_type == pr1[l][0]], pr1)
-
-    elif way_off == 5:
-        rd_types = rd.choice(list(ini_set), size=rd.randint(2, len(list(ini_set))), replace=False)
-        return mutation([l for l in range(len(pr1)) if pr1[l][0] in rd_types], pr1)
-
-    else:  # Do not reach
-        return 0
 def graph_gen(final):
 
     plt.plot([f"Gen{i+1}" for i in range(len(final))], final)
@@ -145,14 +153,14 @@ def graph_makespan(process, setup, best, machines):
     seqs, makespan = best
     _, ax = plt.subplots()
     s_job, s_machine, m_tmp = {}, {}, {}
-    print(seqs)
     for m in machines:
         ax.barh(m, 0, left=0)
         s_machine[m] = 0
         m_tmp[m] = []
-        for jt, job, op, machine in seqs:
-            if (jt, job) not in list(s_job):
-                s_job[(jt, job)] = 0
+    for jt, job, _, _ in seqs:
+        if (jt, job) not in list(s_job):
+            s_job[(jt, job)] = 0
+
     for jt, job, op, m in seqs:
         if len(m_tmp[m]) == 0:
             start_oper = max(s_job[(jt, job)], s_machine[m])
@@ -179,19 +187,25 @@ def ga(process, setup, ini_set, machines, params):
     history = []
     ini_pop = [[jt, job, op] for jt in ini_set.keys() for job in ini_set[jt]["jobs"] for op in ini_set[jt]["ops"]]
     pops = sorted([first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, rd.permutation(ini_pop))) for _ in range(params["pop_size"])], key=lambda case:case[1])
+
     for gen in range(params["num_of_gens"]):
         mating_pool = [select_pop(pops) for _ in range(params["mating_pool"])]
+
         indices = list(range(len(mating_pool)))
         for _ in range(len(mating_pool) // 2):
             mom, dad = [indices.pop(rd.randint(len(indices))) for _ in range(2)]
-            pops.append(second_stage(process, setup, ini_set, machines, mating_pool[mom][0], mating_pool[dad][0]))
+            offspring = second_stage(process, setup, ini_set, machines, mating_pool[mom][0], mating_pool[dad][0])
+            pops.append(offspring)
         """
         for _ in range(params["num_offs"]):
             mom, dad = rd.choice(indices, size=2, replace=False)
             pops.append(decode(process, setup, generate_off(ini_set, mating_pool[mom], mating_pool[dad]), ini_set, machines))
         """
         pops = sorted(pops, key=lambda case:case[1])[:params["pop_size"]]
+        for case in pops:
+            print(case[1], case[0])
         history.append(pops[0][1])
+
     graph_gen(history)
     graph_makespan(process, setup, pops[0], machines)
     print(history)
