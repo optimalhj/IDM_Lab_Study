@@ -40,13 +40,13 @@ def mutation(points, chrom):
     return chrom
 
 def crossover(points, pr1, pr2):
-    pr2 = list(pr2)
+    pr2 = pr2.copy()
     for jt_1, job_1, op_1, _ in [pr1[idx] for idx in points]:
         for l2 in range(len(pr2)-1, -1, -1):
             if pr2[l2][0] == jt_1 and pr2[l2][1] == job_1 and pr2[l2][2] == op_1:
                 pr2.pop(l2)
                 break
-    return tuple([pr1[l] if l in points else pr2.pop(0) for l in range(len(pr1))])
+    return [pr1[l] if l in points else pr2.pop(0) for l in range(len(pr1))]
 
 def first_stage(process, setup, ini_set, machines, seq):
 
@@ -82,8 +82,8 @@ def second_stage(process, setup, ini_set, machines, pr1, pr2):
             for jt_2, job_2, op_2, m_2 in pr2:
                 if jt_1 == jt_2 and job_1 == job_2 and op_1 == op_2:
                     seq[l][3] = m_2
+                    seq[l] = tuple(seq[l])
                     break
-        seq = tuple(seq)
     else:
         seq = 0
 
@@ -189,8 +189,9 @@ def ga(process, setup, ini_set, machines, params):
 
     for gen in range(params["num_of_gens"]):
         mating_pool = [select_pop(pops) for _ in range(params["mating_pool"])]
-
-        indices = list(range(len(mating_pool)))
+        for case in mating_pool:
+            print("\t",case)
+        indices = list(range(params["mating_pool"]))
         for _ in range(len(mating_pool) // 2):
             mom, dad = [indices.pop(rd.randint(len(indices))) for _ in range(2)]
             offspring = second_stage(process, setup, ini_set, machines, mating_pool[mom][0], mating_pool[dad][0])
