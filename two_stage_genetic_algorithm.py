@@ -178,15 +178,15 @@ def ga(process, setup, ini_set, machines, params):
         for case in mating_pool:
             print("\t",case)
         indices = list(range(params["mating_pool"]))
+        """
         for _ in range(len(mating_pool) // 2):
             mom, dad = [indices.pop(rd.randint(len(indices))) for _ in range(2)]
-            offspring = second_stage(process, setup, ini_set, machines, mating_pool[mom][0], mating_pool[dad][0])
-            pops.append(offspring)
+            pops.append(second_stage(process, setup, ini_set, machines, mating_pool[mom][0], mating_pool[dad][0]))
         """
         for _ in range(params["num_offs"]):
             mom, dad = rd.choice(indices, size=2, replace=False)
-            pops.append(decode(process, setup, generate_off(ini_set, mating_pool[mom], mating_pool[dad]), ini_set, machines))
-        """
+            pops.append(second_stage(process, setup, ini_set, machines, mating_pool[mom][0], mating_pool[dad][0]))
+
         pops = sorted(pops, key=lambda case:case[1])[:params["pop_size"]]
         for case in pops:
             print(case[1], case[0])
