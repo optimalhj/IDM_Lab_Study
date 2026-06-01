@@ -20,18 +20,17 @@ def select_pop(populations):
 def correct_procedure(ini_set, seq):
     info_op = {jt : {job : {op : 0 for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
     info_job = {jt: {op: {job: 0 for job in ini_set[jt]["jobs"]} for op in ini_set[jt]["ops"]} for jt in ini_set.keys()}
-    tmp_seq = [[jt, job] for jt, job, _ in seq]
-    for i in range(len(tmp_seq)):
-        jt, job = tmp_seq[i]
+    for i in range(len(seq)):
+        jt, job, _ = seq[i]
         using_op = min(ini_set[jt]["ops"], key=lambda op: info_op[jt][job][op])
         info_op[jt][job][using_op] += 1
-        tmp_seq[i] = [jt, job, using_op]
-    for i in range(len(tmp_seq)):
-        jt, _ , op = tmp_seq[i]
+        seq[i] = (jt, using_op)
+    for i in range(len(seq)):
+        jt, op = seq[i]
         using_job = min(ini_set[jt]["jobs"], key=lambda job: info_job[jt][op][job])
         info_job[jt][op][using_job] += 1
-        tmp_seq[i] = [jt, using_job, op]
-    return tmp_seq
+        seq[i] = (jt, using_job, op)
+    return seq
 
 def mutation(points, chrom):
     insult = [chrom[idx] for idx in points]
@@ -65,8 +64,8 @@ def first_stage(process, setup, ini_set, machines, seq):
         select_m = eligible_m[now.index(real_now)]
         ops_machine[select_m] = (jt, op)
         st_machine[select_m], st_job[jt][job] = [real_now + getattr(process, f"{jt}{op}") for _ in range(2)]
-        seq[l] = [jt, job, op, select_m]
-    return tuple(seq), max(st_machine.values())
+        seq[l] = (jt, job, op, select_m)
+    return seq, max(st_machine.values())
 
 def second_stage(process, setup, ini_set, machines, pr1, pr2):
     way_off = rd.randint(3)
@@ -185,8 +184,8 @@ def graph_makespan(process, setup, best, machines):
 
 def ga(process, setup, ini_set, machines, params):
     history = []
-    ini_pop = [[jt, job, op] for jt in ini_set.keys() for job in ini_set[jt]["jobs"] for op in ini_set[jt]["ops"]]
-    pops = sorted([first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, rd.permutation(ini_pop))) for _ in range(params["pop_size"])], key=lambda case:case[1])
+    ini_pop = [(jt, job, op) for jt in ini_set.keys() for job in ini_set[jt]["jobs"] for op in ini_set[jt]["ops"]]
+    pops = sorted([first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, list(rd.permutation(ini_pop)))) for _ in range(params["pop_size"])], key=lambda case:case[1])
 
     for gen in range(params["num_of_gens"]):
         mating_pool = [select_pop(pops) for _ in range(params["mating_pool"])]
