@@ -32,13 +32,6 @@ def correct_procedure(ini_set, seq):
         seq[i] = (jt, using_job, op)
     return seq
 
-def mutation(points, chrom):
-    insult = [chrom[idx] for idx in points]
-    for l in range(len(chrom)):
-        if l in points:
-            chrom[l] = insult.pop(0)
-    return chrom
-
 def crossover(points, pr1, pr2):
     pr2 = pr2.copy()
     for jt_1, job_1, op_1, _ in [pr1[idx] for idx in points]:
@@ -68,22 +61,41 @@ def first_stage(process, setup, ini_set, machines, seq):
     return seq, max(st_machine.values())
 
 def second_stage(process, setup, ini_set, machines, pr1, pr2):
-    way_off = rd.randint(3)
-    if way_off == 0:  # SCO : Single-Point Crossover Operator
+    way_cross = rd.randint(2)
+    if way_cross == 0:  # SCO : Single-Point Crossover Operator
         seq = crossover([i for i in range(rd.randint(1, len(pr1)))], pr1, pr2)
 
-    elif way_off == 1:  # JCO : Job(Job Type) Crossover Operator
+    elif way_cross == 1:  # JCO : Job(Job Type) Crossover Operator
         seq = crossover([l for l in range(len(pr1)) if pr1[l][0] in rd.choice(list(ini_set), size=1)], pr1, pr2)
 
-    elif way_off == 2:
-        seq = [list(gene) for gene in pr1]
+    elif way_cross == 2:  # ACO : Assignment Crossover
+        seq = pr1.copy()
         for l in range(len(seq)):
             jt_1, job_1, op_1 = seq[l][0], seq[l][1], seq[l][2]
             for jt_2, job_2, op_2, m_2 in pr2:
                 if jt_1 == jt_2 and job_1 == job_2 and op_1 == op_2:
-                    seq[l][3] = m_2
-                    seq[l] = tuple(seq[l])
+                    seq[l] = (jt_1, job_1, op_1, m_2)
                     break
+    else:
+        seq = 0
+
+    way_mutation = rd.randint(2)
+    if way_mutation == 0: # OSM : Operation Swaping Mutation
+        idx1, idx2 = 0, 0
+        while seq[idx1][0] != seq[idx2][0] and seq[idx1][1] != seq[idx2][1] :
+            idx1 = rd.randint(len(seq) - 1)
+            idx2 = idx1 + 1
+        seq[idx1], seq[idx2] = seq[idx2], seq[idx1]
+
+    elif way_mutation == 1: # AAM : Assignment Altering Mutation
+        idx = rd.randint(len(seq))
+        jt, job, op, m_tmp = seq[idx]
+        eligible_m = ini_set[jt]["ops"][op]
+        if len(eligible_m) > 1:
+            select_m = m_tmp
+            while select_m == m_tmp:
+                select_m = rd.choice(eligible_m)
+            seq[idx] = (jt, job, op, select_m)
     else:
         seq = 0
 
@@ -109,32 +121,6 @@ def second_stage(process, setup, ini_set, machines, pr1, pr2):
             print(f"\t{m} : {st_machine[m]}")
         print()
     return seq, max(st_machine.values())
-
-# def generate_off(ini_set, pr1, pr2):
-#     way_off = rd.choice(6)
-#
-#     if way_off == 1: # JCO : Job Crossover Operator
-#         points = []
-#         r_jts = {jt : rd.randint(len(ini_set[jt]["jobs"])) for jt in ini_set.keys()}
-#         for l in range(len(pr1)):
-#             if r_jts[pr1[l][0]] > 0:
-#                 points.append(l)
-#                 r_jts[pr1[l][0]] -= 1
-#         return crossover(points, pr1, pr2)
-#
-#     elif way_off == 3:
-#         return mutation(rd.choice([i for i in range(len(pr1))], size=rd.randint(3, len(list(pr1))), replace=False), pr1)
-#
-#     elif way_off == 4:
-#         rd_type = list(ini_set)[rd.randint(len(list(ini_set)))]
-#         return mutation([l for l in range(len(pr1)) if rd_type == pr1[l][0]], pr1)
-#
-#     elif way_off == 5:
-#         rd_types = rd.choice(list(ini_set), size=rd.randint(2, len(list(ini_set))), replace=False)
-#         return mutation([l for l in range(len(pr1)) if pr1[l][0] in rd_types], pr1)
-#
-#     else:  # Do not reach
-#         return 0
 
 def graph_gen(final):
 
@@ -245,7 +231,7 @@ def main():
     jts = [f"Job_Type{i}" for i in range(1, num_jts + 1)]
     machines = [f"M{i}" for i in range(1, num_machines + 1)]
 
-    processes = {jt : {"jobs":[f"Job{j+1}" for j in range(rd.randint(2,max_num_job+1))], "ops":{f"Op{o+1}" : [sorted(rd.choice(machines, size=rd.randint(1, len(machines)), replace=False),key=lambda machine: machines.index(machine)),rd.randint(2, max_num_op + 1)] for o in range(rd.randint(1, max_num_op + 1))}} for jt in jts}
+    processes = {jt : {"jobs":[f"Job{j+1}" for j in range(rd.randint(2,max_num_job+1))], "ops":{f"Op{o+1}" : [sorted(rd.choice(machines, size=rd.randint(2, len(machines)), replace=False),key=lambda machine: machines.index(machine)),rd.randint(2, max_num_op + 1)] for o in range(rd.randint(1, max_num_op + 1))}} for jt in jts}
 
     op_types = [(jt, op) for jt in jts for op in processes[jt]["ops"]]
     setups = {op1:{op2:0 if op1[0] == op2[0] else rd.randint(1, max(max_time//2, 1) + 1) for op2 in op_types} for op1 in op_types}
