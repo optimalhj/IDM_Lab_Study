@@ -76,7 +76,7 @@ def second_stage(process, setup, ini_set, machines, pr1, pr2):
                 if jt_1 == jt_2 and job_1 == job_2 and op_1 == op_2:
                     seq[l] = (jt_1, job_1, op_1, m_2)
                     break
-    else:
+    else:  # Do not reach
         seq = 0
 
     way_mutation = rd.randint(2)
@@ -106,20 +106,20 @@ def second_stage(process, setup, ini_set, machines, pr1, pr2):
     st_job = {jt: {job: 0 for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
     for l in range(len(seq)):
         jt, job, op, m = seq[l]
-        print("Selected :", jt, job, op, m)
+        # print("Selected :", jt, job, op, m)
         if len(ops_machine[m]) == 0:
             now = max(st_machine[m], st_job[jt][job])
-            print(f"Machine {m} 기준 : {st_machine[m]}  /  작업({jt}, {job}) 기준 : {st_job[jt][job]} --> 현재시점 : {now}")
+            # print(f"Machine {m} 기준 : {st_machine[m]}  /  작업({jt}, {job}) 기준 : {st_job[jt][job]} --> 현재시점 : {now}")
         else:
             now = max(st_machine[m] + getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}"), st_job[jt][job])
-            print(f"Machine {m} 기준 : {st_machine[m]} + Setup(({ops_machine[m][0]},{ops_machine[m][1]}) -> ({jt},{op})({getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}")}) = {now} /  작업({jt}, {job}) 기준 : {st_job[jt][job]} --> 현재시점 : {now}")
+            # print(f"Machine {m} 기준 : {st_machine[m]} + Setup(({ops_machine[m][0]},{ops_machine[m][1]}) -> ({jt},{op})({getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}")}) = {now} /  작업({jt}, {job}) 기준 : {st_job[jt][job]} --> 현재시점 : {now}")
         ops_machine[m] = (jt, op)
         st_machine[m], st_job[jt][job] = [now + getattr(process, f"{jt}{op}") for _ in range(2)]
-        print(f"작업 시간 : {getattr(process, f"{jt}{op}")} --> 작업 완료 시간 : {st_machine[m]}")
-        print(f"Machine 별")
-        for m in machines:
-            print(f"\t{m} : {st_machine[m]}")
-        print()
+        # print(f"작업 시간 : {getattr(process, f"{jt}{op}")} --> 작업 완료 시간 : {st_machine[m]}")
+        # print(f"Machine 별")
+        # for m in machines:
+        #     print(f"\t{m} : {st_machine[m]}")
+        # print()
     return seq, max(st_machine.values())
 
 def graph_gen(final):
@@ -175,8 +175,8 @@ def ga(process, setup, ini_set, machines, params):
 
     for gen in range(params["num_of_gens"]):
         mating_pool = [select_pop(pops) for _ in range(params["mating_pool"])]
-        for case in mating_pool:
-            print("\t",case)
+        # for case in mating_pool:
+        #     print("\t",case)
         indices = list(range(params["mating_pool"]))
         """
         for _ in range(len(mating_pool) // 2):
@@ -188,8 +188,8 @@ def ga(process, setup, ini_set, machines, params):
             pops.append(second_stage(process, setup, ini_set, machines, mating_pool[mom][0], mating_pool[dad][0]))
 
         pops = sorted(pops, key=lambda case:case[1])[:params["pop_size"]]
-        for case in pops:
-            print(case[1], case[0])
+        # for case in pops:
+        #     print(case[1], case[0])
         history.append(pops[0][1])
 
     graph_gen(history)
@@ -225,7 +225,7 @@ def start(processes, setups, machines_tmp, params):
 def main():
 
     # Parameter Input
-    params = {"pop_size": 15, "num_of_gens": 20, "mating_pool": 15, "num_offs": 15}
+    params = {"pop_size": 200, "num_of_gens": 1000, "mating_pool": 100, "num_offs": 200}
     num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 5, 4, 4, 9
 
     jts = [f"Job_Type{i}" for i in range(1, num_jts + 1)]
