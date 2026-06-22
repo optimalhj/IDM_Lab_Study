@@ -38,7 +38,7 @@ def crossover(points, pr1, pr2):
     return [pr1[l] if l in points else pr2.pop(0) for l in range(len(pr1))]
 
 def objective(alt, awt, w):
-    return w * alt + (1-w) * awt
+    return w * alt + (1 - w) * awt
 
 def first_stage(process, setup, ini_set, machines, seq, w):
     ops_machine, st_machine, p_tot, s_tot = {}, {}, 0, 0
