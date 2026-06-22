@@ -19,20 +19,23 @@ def select_pop(populations):
     else:  # Do not reach
         return 0
 
-def objective(process, setup, ini_set, machines, seq, o_max, s_max, t, w):
-    md = gp.Model()
-    st_job, ed_job = {}, {}
+def objective(process, setup, ini_set, machines, seq, o_max, s_max, T, w):
+    env = gp.Env(empty=True)
+    env.setParam('OutputFlag', 0)
+    env.start()
+    md = gp.Model(env=env)
 
+    se_each = {}
     for jt in ini_set.keys():
-        st_job[jt], ed_job[jt] = {},{}
+        se_each[jt] = {}
         for job in ini_set[jt]["jobs"]:
-            st_job[jt][job], ed_job[jt][job] = {}, {}
+            se_each[jt][job] = {}
             for op in ini_set[jt]["ops"]:
-                st_job[jt][job][op], ed_job[jt][job][op] = [md.addVar(vtype=GRB.CONTINUOUS) for _ in range(2)]
-                md.addConstr(st_job[jt][job][op] >= 0)
-                md.addConstr(ed_job[jt][job][op] == st_job[jt][job][op] + getattr(process, f"{jt}{op}"))
-                if op != ini_set[jt]["ops"][-1]:
-                    md.addConstr(st_job[jt][job][ini_set[jt]["ops"][ini_set[jt]["ops"].index(op) + 1]] >= ed_job[jt][job][op])
+                se_each[jt][job][op] = [md.addVar(vtype=GRB.CONTINUOUS) for _ in range(2)]
+                md.addConstrs(se_each[jt][job][op][i] >= 0 for i in range(2))
+                md.addConstr(se_each[jt][job][op][1] == se_each[jt][job][op][0] + getattr(process, f"{jt}{op}"))
+                if op != list(ini_set[jt]["ops"])[0]:
+                    md.addConstr(se_each[jt][job][op][0] >= se_each[jt][job][list(ini_set[jt]["ops"])[list(ini_set[jt]["ops"]).index(op) - 1]][1])
 
     st_setup = {jt1: {op1: {jt2: {op2: md.addVar(vtype=GRB.CONTINUOUS) for op2 in ini_set[jt2]["ops"]} for jt2 in ini_set.keys()} for op1 in ini_set[jt1]["ops"]} for jt1 in ini_set.keys()}
     for m in machines:
@@ -40,11 +43,27 @@ def objective(process, setup, ini_set, machines, seq, o_max, s_max, t, w):
         for l in range(len(seq_m) - 1):
             jt, job, op, _ = seq_m[l]
             next_jt, next_job, next_op, _ = seq_m[l + 1]
-            md.addConstr(st_setup[jt][op][next_jt][next_op] >= ed_job[jt][job][op])
-            md.addConstr(st_job[jt][job][ini_set[jt]["ops"][ini_set[jt]["ops"].index(op) + 1]] >= st_setup[jt][op][next_jt][next_op] + getattr(setup, f"{jt}{op}{next_jt}{next_op}"))
+            md.addConstr(st_setup[jt][op][next_jt][next_op] >= se_each[jt][job][op][1])
+            md.addConstr(se_each[next_jt][next_job][next_op][0] >= st_setup[jt][op][next_jt][next_op] + getattr(setup, f"{jt}{op}{next_jt}{next_op}"))
 
-    for t_tmp in range(sum(getattr(process,f"{jt}{op}") for jt in ini_set.keys() for _ in range(len(ini_set[jt]["jobs"])) for op in ini_set[jt]["ops"])):
-        md.addConstr(1>=0)
+    m_time = {}
+    f_u, f_s, t_pm, t_sm = [md.addVar(vtype=GRB.CONTINUOUS) for _ in range(4)]
+    for m in machines:
+        m_time[m] = {}
+        seq_m = [sche for sche in seq if sche[3] == m]
+        for t in range(T):
+            m_time[m][t] = {"p":{}, "s":{}}
+
+            for jt, job, op, _ in seq_m:
+                m_time[m][t]["p"][f"{jt}{job}{op}"] = [md.addVar(vtype=GRB.BINARY) for _ in range(3)]
+                md.addConstr(sum(m_time[m][t]["p"][f"{jt}{job}{op}"]) == 1)
+
+                md.addGenConstrIndicator(m_time[m][t]["p"][f"{jt}{job}{op}"][0], True, se_each[jt][job][op][0] >= t + 1)
+                md.addGenConstrIndicator(m_time[m][t]["p"][f"{jt}{job}{op}"][1], True, se_each[jt][job][op][0] <= t)
+                md.addGenConstrIndicator(m_time[m][t]["p"][f"{jt}{job}{op}"][1], True, se_each[jt][job][op][1] >= t + 1)
+                md.addGenConstrIndicator(m_time[m][t]["p"][f"{jt}{job}{op}"][2], True, se_each[jt][job][op][1] <= t)
+            md.addConstr(f_u == )
+
     return 0
 
 def correct_procedure(process, setup, ini_set, machines, seq, o_max, s_max, t, w):
