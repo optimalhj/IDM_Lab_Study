@@ -5,7 +5,7 @@ from gurobipy import GRB
 
 # Parameter Input
 num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 2, 3, 3, 9
-params = {"pop_size": 5, "num_of_gens": 1, "mating_pool": 100, "num_offs": 200, "o_max": 20, "s_max": 2, "T": 20, "w": 0.5}
+params = {"pop_size": 5, "num_of_gens": 10, "mating_pool": 20, "num_offs": 20, "o_max": 20, "s_max": 2, "T": 20, "w": 0.5}
 
 def select_pop(populations):
     indices = list(range(len(populations)))
@@ -63,9 +63,9 @@ def objective(process, setup, ini_set, machines, seq):
             jt, job, op, _ = seq_m[l]
             next_jt, next_job, next_op, _ = seq_m[l + 1]
             se_setup[m][f"{l}{l+1}"] = [md.addVar(vtype=GRB.CONTINUOUS) for _ in range(2)] + [(jt, op, next_jt, next_op)]
-            md.addConstr(se_setup[m][f"{l}{l + 1}"][1] == se_setup[m][f"{l}{l + 1}"][0] + getattr(setup,f"{jt}{op}{next_jt}{next_op}"))
             md.addConstr(se_setup[m][f"{l}{l + 1}"][0] >= se_process[jt][job][op][1])
-            md.addConstr(se_process[next_jt][next_job][next_op][0] >= se_setup[m][f"{l}{l + 1}"][1])
+            md.addConstr(se_setup[m][f"{l}{l + 1}"][1] == se_setup[m][f"{l}{l + 1}"][0] + getattr(setup,f"{jt}{op}{next_jt}{next_op}"))
+            md.addConstr(se_process[next_jt][next_job][next_op][0] == se_setup[m][f"{l}{l + 1}"][1])
 
             m_time[m]["p"][l] = {}
             m_time[m]["s"][f"{l}{l+1}"] = {}
@@ -111,7 +111,6 @@ def objective(process, setup, ini_set, machines, seq):
     m_load = {m : sum(getattr(process, f"{jt}{op}") for jt, _, op, m_tmp in seq if m_tmp == m) for m in machines}
     for m in machines:
         if m_load[m] == 0: m_load.pop(m)
-    print("Machine Loads :", m_load)
     f_b = max(m_load.values()) / min(m_load.values()) - 1
     return seq, (md.ObjVal, f_u.X, f_s.X, f_c, f_i, f_b), se_process, se_setup
 
@@ -230,26 +229,28 @@ def ga(process, setup, ini_set, machines):
         for _ in range(params["num_offs"]):
             mom, dad = choose_parents(mating_pool, cr)
             offsprings.append(crossover(process, setup, ini_set, machines, mating_pool[mom][0].copy(), mating_pool[dad][0].copy()))
-        offsprings.sort(key=lambda offs:offs[1][0])
+        offsprings.sort(key=lambda offs:(-offs[1][0], offs[1][1]))
 
         # seq, (md.ObjVal, f_u.X, f_s.X, f_c, f_i, f_b), se_process, se_setup
-        print(offsprings)
-        print(offsprings[0][1][0])
-        if offsprings[0][1][0] < pops[0][1][0]:
+        print("Pops :\n")
+        for values in pops:
+            print(f"\t{values[1]}")
+        print("\nOffsprings :\n")
+        for values in offsprings:
+            print(f"\t{values[1]}")
+        if offsprings[0][1][0] > pops[0][1][0]:
             cr = 1
             pops = sorted(pops + offsprings, key=lambda case: (-case[1][0], -case[1][1]))[:params["pop_size"]]
+            print("Replaced")
         elif offsprings[0][1][3] >= pops[0][1][3]:
             cr = 2
-        elif offsprings[0][1][5] > pops[0][1][5]:
+        elif offsprings[0][1][5] >= pops[0][1][5]:
             cr = 3
-        elif offsprings[0][1][4] > pops[0][1][4]:
+        elif offsprings[0][1][4] >= pops[0][1][4]:
             cr = 4
         else:
             cr = 1
 
-
-        # for case in pops:
-        #     print(case[1], case[0])
         history.append(pops[0][1][0])
 
     graph_gen(history)
@@ -293,10 +294,8 @@ def main():
     for jt in processes.keys():
         print(jt)
         for job in processes[jt]:
-            print("\t", end="")
-            print(job)
-            print("\t", end="")
-            print(processes[jt][job])
+            print(f"\t{job}")
+            print(f"\t{processes[jt][job]}")
         print()
 
     for op1 in setups.keys():
