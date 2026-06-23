@@ -5,7 +5,7 @@ from gurobipy import GRB
 
 # Parameter Input
 num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 2, 3, 3, 9
-params = {"pop_size": 5, "num_of_gens": 3, "mating_pool": 20, "num_offs": 20, "o_max": 20, "s_max": 2, "T": 20, "w": 0.5, "K": 0.75}
+params = {"pop_size": 5, "num_of_gens": 5, "mating_pool": 20, "num_offs": 10, "o_max": 20, "s_max": 2, "T": 20, "w": 0.5, "K": 0.75}
 
 def select_mp(populations):
     index = list(range(params["pop_size"]))
@@ -118,8 +118,8 @@ def crossing(points, pr1, pr2, apx=True):
     return [pr1[i] if i in points else pr2.pop(0) for i in range(len(pr1))]
 
 def crossover(process, setup, ini_set, machines, mating_pool, cr):
+    print(f"Crossover Way : CR{cr}")
 
-    points = []
     index = list(range(params["mating_pool"]))
 
     if cr == 1: # Based on Job Type
@@ -129,16 +129,15 @@ def crossover(process, setup, ini_set, machines, mating_pool, cr):
 
         chosen_jt = rd.choice(list(ini_set))
         print("\t", chosen_jt, end="  /  ")
-        for idx in range(len(pr1)):
-            if pr1[idx][0] == chosen_jt:
-                points.append(idx)
+        points = [idx for idx in range(len(pr1)) if pr1[idx][0] == chosen_jt]
         print("points :", points)
         child = crossing(points, pr1, pr2, apx=False)
     else:
         if cr == 2: # Based on F_c(# of Setup Change)
             index.sort(key=lambda idx:mating_pool[idx][1][3])
-            pr1 = mating_pool[rd.choice(index[:int(params["mating_pool"] * params["K"])])][0].copy()
-            pr2 = mating_pool[rd.choice(index[params["mating_pool"] - int(params["mating_pool"]*params["K"]):])][0].copy()
+            pr1 = rd.choice(index[:int(params["mating_pool"] * params["K"])])
+            pr2 = rd.choice(index[params["mating_pool"] - int(params["mating_pool"] * params["K"]):])
+
         else:
             if cr == 3: # Based on F_b(Degree of Machine Load)
                 index.sort(key=lambda idx:-mating_pool[idx][1][5])
@@ -146,10 +145,11 @@ def crossover(process, setup, ini_set, machines, mating_pool, cr):
                 index.sort(key=lambda idx:mating_pool[idx][1][4])
             else: pass # Do not reach
             pr1 = rd.choice(index[:int(params["mating_pool"] * params["K"])])
-            pr2 = rd.choice(index[max(params["mating_pool"] - int(params["mating_pool"]) * params["K"], pr1 + 1):])
+            pr2 = rd.choice(index[max(params["mating_pool"] - int(params["mating_pool"] * params["K"]), pr1 + 1):])
+        pr1, pr2 = [mating_pool[pr][0].copy() for pr in (pr1, pr2)]
         print(f"pr1 : ({len(pr1)})", pr1)
         print(f"pr2 : ({len(pr2)})", pr2)
-        child = crossing(points, pr1, pr2)
+        child = crossing(list(range(len(pr1))), pr1, pr2)
 
     print(f"\nchd : ({len(child)})", child)
     print("-"*50)
@@ -240,11 +240,11 @@ def ga(process, setup, ini_set, machines):
             cr = 1
             pops = sorted(pops + offsprings, key=lambda case: (-case[1][0], -case[1][1]))[:params["pop_size"]]
             print("Replaced")
-        elif offsprings[0][1][3] >= pops[0][1][3]:
+        elif offsprings[0][1][3] > pops[0][1][3]:
             cr = 2
-        elif offsprings[0][1][5] >= pops[0][1][5]:
+        elif offsprings[0][1][5] > pops[0][1][5]:
             cr = 3
-        elif offsprings[0][1][4] >= pops[0][1][4]:
+        elif offsprings[0][1][4] > pops[0][1][4]:
             cr = 4
         else:
             cr = 1
