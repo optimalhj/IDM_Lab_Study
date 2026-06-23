@@ -5,35 +5,20 @@ from gurobipy import GRB
 
 # Parameter Input
 num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 2, 3, 3, 9
-params = {"pop_size": 5, "num_of_gens": 10, "mating_pool": 20, "num_offs": 20, "o_max": 20, "s_max": 2, "T": 20, "w": 0.5}
+params = {"pop_size": 5, "num_of_gens": 3, "mating_pool": 20, "num_offs": 20, "o_max": 20, "s_max": 2, "T": 20, "w": 0.5, "K": 0.75}
 
-def select_pop(populations):
-    indices = list(range(len(populations)))
+def select_mp(populations):
+    index = list(range(params["pop_size"]))
     way_pop = rd.randint(3)
 
     if way_pop == 0:  # Binary tournament
-        chosen = populations[min(rd.choice(indices, size=2, replace=False), key=lambda idx: populations[idx][1])]
+        return populations[min(rd.choice(index, size=2, replace=False), key=lambda idx: populations[idx][1])]
     elif way_pop == 1:  # n-Size tournament
-        chosen = populations[min(rd.choice(indices, size=rd.randint(3, max(4, int(len(indices) / 2.5))), replace=False), key=lambda idx: populations[idx][1])]
+        return populations[min(rd.choice(index, size=rd.randint(3, max(4, int(params["pop_size"] / 2.5))), replace=False), key=lambda idx: populations[idx][1])]
     elif way_pop == 2:  # Linear ranking
-        chosen = populations[rd.choice(indices, size=1, p=[2 * i / (len(indices) * (len(indices) + 1)) for i in range(len(indices), 0, -1)])[0]]
+        return populations[rd.choice(index, size=1, p=[2 * i / (params["pop_size"] * (params["pop_size"] + 1)) for i in range(params["pop_size"], 0, -1)])[0]]
     else:  # Do not reach
-        chosen = []
-    return chosen
-
-def choose_parents(mating_pool, way_pr_select):
-    indices = list(range(len(mating_pool)))
-    if way_pr_select == 0:
-        mom, dad = rd.choice(indices, size=2, replace=False)
-    elif way_pr_select == 1:
-        mom, dad = 0, 1
-    elif way_pr_select == 2:
-        mom, dad = 0, 1
-    elif way_pr_select == 3:
-        mom, dad = 0, 1
-    else:
-        mom, dad = 0, 0
-    return mom, dad
+        return []
 
 def objective(process, setup, ini_set, machines, seq):
     env = gp.Env(empty=True)
@@ -132,15 +117,16 @@ def crossing(points, pr1, pr2, apx=True):
     print(f"\tpr2 : ({len(pr2)})", pr2)
     return [pr1[i] if i in points else pr2.pop(0) for i in range(len(pr1))]
 
-def crossover(process, setup, ini_set, machines, pr1, pr2):
-    way_cross = rd.randint(4)
-    way_cross = 0
+def crossover(process, setup, ini_set, machines, mating_pool, cr):
+
     points = []
+    index = list(range(params["mating_pool"]))
 
-    print(f"pr1 : ({len(pr1)})", pr1)
-    print(f"pr2 : ({len(pr2)})", pr2)
+    if cr == 1: # Based on Job Type
+        pr1, pr2 = [mating_pool[pr][0].copy() for pr in rd.choice(index, size=2, replace=False)]
+        print(f"pr1 : ({len(pr1)})", pr1)
+        print(f"pr2 : ({len(pr2)})", pr2)
 
-    if way_cross == 0: #CR1
         chosen_jt = rd.choice(list(ini_set))
         print("\t", chosen_jt, end="  /  ")
         for idx in range(len(pr1)):
@@ -148,10 +134,23 @@ def crossover(process, setup, ini_set, machines, pr1, pr2):
                 points.append(idx)
         print("points :", points)
         child = crossing(points, pr1, pr2, apx=False)
-    elif way_cross == 1: #CR2
-        child = []
-    else: # Do not reach
-        child = []
+    else:
+        if cr == 2: # Based on F_c(# of Setup Change)
+            index.sort(key=lambda idx:mating_pool[idx][1][3])
+            pr1 = mating_pool[rd.choice(index[:int(params["mating_pool"] * params["K"])])][0].copy()
+            pr2 = mating_pool[rd.choice(index[params["mating_pool"] - int(params["mating_pool"]*params["K"]):])][0].copy()
+        else:
+            if cr == 3: # Based on F_b(Degree of Machine Load)
+                index.sort(key=lambda idx:-mating_pool[idx][1][5])
+            elif cr == 4: # Based on F_i(Degree of Idle Time)
+                index.sort(key=lambda idx:mating_pool[idx][1][4])
+            else: pass # Do not reach
+            pr1 = rd.choice(index[:int(params["mating_pool"] * params["K"])])
+            pr2 = rd.choice(index[max(params["mating_pool"] - int(params["mating_pool"]) * params["K"], pr1 + 1):])
+        print(f"pr1 : ({len(pr1)})", pr1)
+        print(f"pr2 : ({len(pr2)})", pr2)
+        child = crossing(points, pr1, pr2)
+
     print(f"\nchd : ({len(child)})", child)
     print("-"*50)
 
@@ -219,7 +218,7 @@ def ga(process, setup, ini_set, machines):
     pops = sorted([correct_procedure(process, setup, ini_set, machines, rd.permutation(ini_pop).tolist()) for _ in range(params["pop_size"])], key=lambda case:-case[1][0])
     cr = 1
     for gen in range(params["num_of_gens"]):
-        mating_pool = [select_pop(pops) for _ in range(params["mating_pool"])]
+        mating_pool = [select_mp(pops) for _ in range(params["mating_pool"])]
         offsprings = []
         """
         for _ in range(len(mating_pool) // 2):
@@ -227,8 +226,7 @@ def ga(process, setup, ini_set, machines):
             pops.append(second_stage(process, setup, ini_set, machines, mating_pool[mom][0], mating_pool[dad][0]))
         """
         for _ in range(params["num_offs"]):
-            mom, dad = choose_parents(mating_pool, cr)
-            offsprings.append(crossover(process, setup, ini_set, machines, mating_pool[mom][0].copy(), mating_pool[dad][0].copy()))
+            offsprings.append(crossover(process, setup, ini_set, machines, mating_pool.copy(), cr))
         offsprings.sort(key=lambda offs:(-offs[1][0], offs[1][1]))
 
         # seq, (md.ObjVal, f_u.X, f_s.X, f_c, f_i, f_b), se_process, se_setup
@@ -274,9 +272,8 @@ def start(processes, setups, machines_tmp):
             setattr(process, f"{jt}{op}", processing_time)
     machines.sort(key=lambda machine: machines_tmp.index(machine))
 
-    for op_type1 in setups:
-        for op_type2 in setups:
-            (jt1, op1), (jt2, op2) = op_type1, op_type2
+    for jt1, op1 in setups:
+        for jt2, op2 in setups:
             setattr(setup, f"{jt1}{op1}{jt2}{op2}", setups[(jt1, op1)][(jt2, op2)])
 
     ga(process, setup, ini_set, machines)
