@@ -117,7 +117,7 @@ def crossing(points, pr1, pr2, apx=True):
     print(f"\tpr2 : ({len(pr2)})", pr2)
     return [pr1[i] if i in points else pr2.pop(0) for i in range(len(pr1))]
 
-def crossover(process, setup, ini_set, machines, mating_pool, cr):
+def crossover(mating_pool, cr):
     print(f"Crossover Way : CR{cr}")
 
     index = list(range(params["mating_pool"]))
@@ -127,7 +127,7 @@ def crossover(process, setup, ini_set, machines, mating_pool, cr):
         print(f"pr1 : ({len(pr1)})", pr1)
         print(f"pr2 : ({len(pr2)})", pr2)
 
-        chosen_jt = rd.choice(list(ini_set))
+        chosen_jt = pr1[rd.randint(len(pr1))][0]
         print("\t", chosen_jt, end="  /  ")
         points = [idx for idx in range(len(pr1)) if pr1[idx][0] == chosen_jt]
         print("points :", points)
@@ -153,8 +153,42 @@ def crossover(process, setup, ini_set, machines, mating_pool, cr):
 
     print(f"\nchd : ({len(child)})", child)
     print("-"*50)
+    return child
 
-    return objective(process, setup, ini_set, machines, child)
+def mutation(process, setup, ini_set, machines, seq):
+    random_idx = rd.randint(len(seq))
+    jt, job, op, m = seq.pop(random_idx)
+    place_in_job = list(ini_set[jt]["ops"]).index(op)
+    if place_in_job == 0:
+        if len(list(ini_set[jt]["ops"])) > 1:
+            for l in range(random_idx, len(seq)):
+                if seq[l][0] == jt and seq[l][1] == job and seq[l][2] == list(ini_set[jt]["ops"])[place_in_job + 1]:
+                    next_idx = l
+                    break
+        else: next_idx = len(seq) + 1
+        if next_idx == 0: seq.insert(0, (jt, job, op, m))
+        else: seq.insert(rd.choice([i for i in range(next_idx + 1) if i != random_idx]), (jt, job, op, m))
+
+    elif place_in_job == len(ini_set[jt]["ops"]) - 1:
+        for l in range(random_idx - 1, -1, -1):
+            if seq[l][0] == jt and seq[l][1] == job and seq[l][2] == list(ini_set[jt]["ops"])[place_in_job - 1]:
+                prior_idx = l
+                break
+        if prior_idx == len(seq) - 1: seq.append((jt, job, op, m))
+        else: seq.insert(rd.choice([i for i in range(prior_idx + 1, len(seq) + 1) if i != random_idx]), (jt, job, op, m))
+
+    else:
+        for l in range(random_idx - 1, -1, -1):
+            if seq[l][0] == jt and seq[l][1] == job and seq[l][2] == list(ini_set[jt]["ops"])[place_in_job - 1]:
+                prior_idx = l
+                break
+        for l in range(random_idx, len(seq)):
+            if seq[l][0] == jt and seq[l][1] == job and seq[l][2] == list(ini_set[jt]["ops"])[place_in_job + 1]:
+                next_idx = l
+                break
+        if next_idx - prior_idx == 1: seq.insert(next_idx, (jt, job, op, m))
+        else: seq.insert(rd.choice([i for i in range(prior_idx + 1, next_idx + 1)]), (jt, job, op, m))
+    return objective(process, setup, ini_set, machines, seq)
 
 def correct_procedure(process, setup, ini_set, machines, seq):
     info_op = {jt : {job : {op : 0 for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
@@ -226,7 +260,8 @@ def ga(process, setup, ini_set, machines):
             pops.append(second_stage(process, setup, ini_set, machines, mating_pool[mom][0], mating_pool[dad][0]))
         """
         for _ in range(params["num_offs"]):
-            offsprings.append(crossover(process, setup, ini_set, machines, mating_pool.copy(), cr))
+            before_mutation = crossover(mating_pool.copy(), cr)
+            offsprings.append(mutation(process, setup, ini_set, machines, before_mutation))
         offsprings.sort(key=lambda offs:(-offs[1][0], offs[1][1]))
 
         # seq, (md.ObjVal, f_u.X, f_s.X, f_c, f_i, f_b), se_process, se_setup
