@@ -21,83 +21,54 @@ def select_mp(populations):
         return []
 
 def objective(process, setup, ini_set, machines, seq):
-    env = gp.Env(empty=True)
-    env.setParam('OutputFlag', 0)
-    env.start()
-    md = gp.Model(env=env)
-
-    se_process = {}
-    for jt in ini_set.keys():
-        se_process[jt] = {}
-        for job in ini_set[jt]["jobs"]:
-            se_process[jt][job] = {}
-            for op in ini_set[jt]["ops"]:
-                se_process[jt][job][op] = [md.addVar(vtype=GRB.CONTINUOUS) for _ in range(2)]
-                md.addConstrs(se_process[jt][job][op][i] >= 0 for i in range(2))
-                md.addConstr(se_process[jt][job][op][1] == se_process[jt][job][op][0] + getattr(process, f"{jt}{op}"))
-                if op != list(ini_set[jt]["ops"])[0]:
-                    md.addConstr(se_process[jt][job][op][0] >= se_process[jt][job][list(ini_set[jt]["ops"])[list(ini_set[jt]["ops"]).index(op) - 1]][1])
-
-    m_time = {}
-    f_u, f_s, t_pm, t_sm = [md.addVar(vtype=GRB.CONTINUOUS) for _ in range(4)]
+    se_process = {jt: {job: {op: [] for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
+    st_job = {jt: {job: 0 for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
     se_setup = {}
+    ops_machine, st_machine = {}, {}
     for m in machines:
-        m_time[m], se_setup[m] = {"p":{},"s":{}}, {}
-        seq_m = [sche for sche in seq if sche[3] == m]
-        for l in range(len(seq_m) - 1):
-            jt, job, op, _ = seq_m[l]
-            next_jt, next_job, next_op, _ = seq_m[l + 1]
-            se_setup[m][f"{l}{l+1}"] = [md.addVar(vtype=GRB.CONTINUOUS) for _ in range(2)] + [(jt, op, next_jt, next_op)]
-            md.addConstr(se_setup[m][f"{l}{l + 1}"][0] >= se_process[jt][job][op][1])
-            md.addConstr(se_setup[m][f"{l}{l + 1}"][1] == se_setup[m][f"{l}{l + 1}"][0] + getattr(setup,f"{jt}{op}{next_jt}{next_op}"))
-            md.addConstr(se_process[next_jt][next_job][next_op][0] == se_setup[m][f"{l}{l + 1}"][1])
+        se_setup[m] = {}
+        ops_machine[m] = []
+        st_machine[m] = 0
 
-            m_time[m]["p"][l] = {}
-            m_time[m]["s"][f"{l}{l+1}"] = {}
-            for t in range(sum(getattr(process, f"{jt}{op}") for jt in ini_set.keys() for _ in range(len(ini_set[jt]["jobs"])) for op in ini_set[jt]["ops"])):
-                m_time[m]["p"][l][t] = [md.addVar(vtype=GRB.BINARY) for _ in range(3)]
-                md.addConstr(gp.quicksum(m_time[m]["p"][l][t]) == 1)
-                md.addGenConstrIndicator(m_time[m]["p"][l][t][0], True, se_process[jt][job][op][0] >= t + 1)
-                md.addGenConstrIndicator(m_time[m]["p"][l][t][1], True, se_process[jt][job][op][0] <= t)
-                md.addGenConstrIndicator(m_time[m]["p"][l][t][1], True, se_process[jt][job][op][1] >= t + 1)
-                md.addGenConstrIndicator(m_time[m]["p"][l][t][2], True, se_process[jt][job][op][1] <= t)
-
-                m_time[m]["s"][f"{l}{l+1}"][t] = [md.addVar(vtype=GRB.BINARY) for _ in range(3)]
-                md.addConstr(gp.quicksum(m_time[m]["s"][f"{l}{l+1}"][t]) == 1)
-                md.addGenConstrIndicator(m_time[m]["s"][f"{l}{l+1}"][t][0], True, se_setup[m][f"{l}{l+1}"][0] >= t + 1)
-                md.addGenConstrIndicator(m_time[m]["s"][f"{l}{l+1}"][t][1], True, se_setup[m][f"{l}{l+1}"][0] <= t)
-                md.addGenConstrIndicator(m_time[m]["s"][f"{l}{l+1}"][t][1], True, se_setup[m][f"{l}{l+1}"][1] >= t + 1)
-                md.addGenConstrIndicator(m_time[m]["s"][f"{l}{l+1}"][t][2], True, se_setup[m][f"{l}{l+1}"][1] <= t)
-
-        if len(seq_m) >= 1:
-            m_time[m]["p"][len(seq_m) - 1] = {}
-            jt, job, op, _ = seq_m[-1]
-            for t in range(sum(getattr(process, f"{jt}{op}") for jt in ini_set.keys() for _ in range(len(ini_set[jt]["jobs"])) for op in ini_set[jt]["ops"])):
-
-                m_time[m]["p"][len(seq_m) - 1][t] = [md.addVar(vtype=GRB.BINARY) for _ in range(3)]
-                md.addConstr(gp.quicksum(m_time[m]["p"][len(seq_m) - 1][t]) == 1)
-                md.addGenConstrIndicator(m_time[m]["p"][len(seq_m) - 1][t][0], True, se_process[jt][job][op][0] >= t + 1)
-                md.addGenConstrIndicator(m_time[m]["p"][len(seq_m) - 1][t][1], True, se_process[jt][job][op][0] <= t)
-                md.addGenConstrIndicator(m_time[m]["p"][len(seq_m) - 1][t][1], True, se_process[jt][job][op][1] >= t + 1)
-                md.addGenConstrIndicator(m_time[m]["p"][len(seq_m) - 1][t][2], True, se_process[jt][job][op][1] <= t)
-
-    for t in range(sum(getattr(process, f"{jt}{op}") for jt in ini_set.keys() for _ in range(len(ini_set[jt]["jobs"])) for op in ini_set[jt]["ops"])):
-        md.addConstr(sum(m_time[m]["s"][f"{l}{l+1}"][t][1] for m in machines for l in range(len([sche for sche in seq if sche[3] == m]) - 1)) <= params["s_max"])
-
-    md.addConstr(f_u == gp.quicksum(m_time[m]["p"][l][t][1] for m in machines for l in range(len([sche for sche in seq if sche[3] == m])) for t in range(params["T"])) / params["T"] / len(machines))
-    md.addConstr(f_s == gp.quicksum(m_time[m]["s"][f"{l}{l+1}"][t][1] for m in machines for l in range(len([sche for sche in seq if sche[3] == m]) - 1) for t in range(params["T"])) / params["T"] / len(machines))
-    md.setObjective(params["w"] * f_u - (1 - params["w"]) * f_s, GRB.MAXIMIZE)
-    md.optimize()
-
-    se_process = {jt : {job : {op : [se_process[jt][job][op][i].X for i in range(2)] for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
-    se_setup = {m:{f"{l}{l+1}" : [se_setup[m][f"{l}{l+1}"][i].X for i in range(2)] + [se_setup[m][f"{l}{l+1}"][2]] for l in range(len([sche for sche in seq if sche[3] == m]) - 1)} for m in machines}
-    f_c = sum(1 for m in se_setup for place in se_setup[m] if se_setup[m][place][0] != se_setup[m][place][1])
-    f_i = 1 - f_u.X - f_s.X
-    m_load = {m : sum(getattr(process, f"{jt}{op}") for jt, _, op, m_tmp in seq if m_tmp == m) for m in machines}
-    for m in machines:
-        if m_load[m] == 0: m_load.pop(m)
-    f_b = max(m_load.values()) / min(m_load.values()) - 1
-    return seq, (md.ObjVal, f_u.X, f_s.X, f_c, f_i, f_b), se_process, se_setup
+    for l in range(len(seq)):
+        jt, job, op, m = seq[l]
+        if len(ops_machine[m]) == 0:
+            now = max(st_machine[m], st_job[jt][job])
+        else:
+            setup_time = getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}")
+            now = max(st_machine[m] + setup_time, st_job[jt][job])
+            if setup_time != 0:
+                se_setup[m][f"{l-1}{l}"] = [now - setup_time, now]
+        se_process[jt][job][op].append(now)
+        ops_machine[m] = (jt, op)
+        st_machine[m], st_job[jt][job] = [now + getattr(process, f"{jt}{op}") for _ in range(2)]
+        se_process[jt][job][op].append(st_machine[m])
+    f_u = 0
+    for jt in ini_set.keys():
+        for job in ini_set["jobs"]:
+            for op in ini_set["ops"]:
+                if params["T"] >= se_process[jt][job][op][1]:
+                    f_u += se_process[jt][job][op][1] - se_process[jt][job][op][0]
+                elif se_process[jt][job][op][0] <= params["T"] < se_process[jt][job][op][1]:
+                    f_u += params["T"] - se_process[jt][job][op][0]
+                else: break
+    f_u /= (len([m for m in machines if len(ops_machine) != 0]) * params["T"])
+    f_s = 0
+    f_c = 0
+    for m in se_setup:
+        for l in se_setup[m]:
+            if params["T"] >= se_setup[1]:
+                f_s += se_setup[m][l][1] - se_setup[m][l][0]
+                f_c += 1
+            elif se_setup[m][l][0] <= params["T"] < se_setup[m][l][1]:
+                f_s += params["T"] - se_setup[m][l][0]
+                f_c += 1
+            else: break
+    f_s /= (len([m for m in machines if len(ops_machine) != 0]) * params["T"])
+    f_i = 1- f_u - f_s
+    f_b = max(st_machine.values()) / min(st_machine.values()) - 1
+    obj = params["w"] * f_u - (1 - params["w"]) * f_s
+    return seq, (obj, f_u, f_s, f_c, f_i, f_b), se_process, se_setup
 
 def crossing(points, pr1, pr2, apx=True):
     print("\n               Before                         -->                     After")
