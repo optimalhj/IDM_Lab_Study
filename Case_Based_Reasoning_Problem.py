@@ -2,7 +2,20 @@ from numpy import random as rd
 
 # Parameter Input
 num_jts ,max_num_job, max_num_op, num_machines, max_time = 4, 5, 5, 7, 9
-params = {"pop_size": 5, "num_of_gens": 20, "mating_pool": 20, "num_offs": 10, "s_max": 2, "T": 20, "w": 0.5, "K": 0.25}
+params = {"pop_size": 5, "num_of_gens": 20, "mating_pool": 20, "num_offs": 10, "s_max": 2, "T": 20, "w_gaso": 0.5, "w_main": 0.4, "K": 0.25}
+
+def select_mp(populations):
+    index = list(range(params["pop_size"]))
+    way_pop = rd.randint(3)
+
+    if way_pop == 0:  # Binary tournament
+        return populations[min(rd.choice(index, size=2, replace=False), key=lambda idx: populations[idx][1][0])]
+    elif way_pop == 1:  # n-Size tournament
+        return populations[min(rd.choice(index, size=rd.randint(3, max(4, int(params["pop_size"] / 2.5))), replace=False), key=lambda idx: populations[idx][1][0])]
+    elif way_pop == 2:  # Linear ranking
+        return populations[rd.choice(index, size=1, p=[2 * i / (params["pop_size"] * (params["pop_size"] + 1)) for i in range(params["pop_size"], 0, -1)])[0]]
+    else:  # Do not reach
+        return []
 
 def correct_procedure(ini_set, seq):
     info_op = {jt : {job : {op : 0 for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
@@ -19,8 +32,219 @@ def correct_procedure(ini_set, seq):
         seq[i] = (jt, using_job, op)
     return seq
 
+def objective(process, setup, ini_set, seq):
+    se_process = {jt: {job: {op: [] for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
+    st_job = {jt: {job: 0 for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
+    se_setup, ops_machine, st_machine, t_setup, p_tot, s_tot = {}, {}, {}, {}, 0, 0
+    for _, _, _, m in seq:
+        if m not in se_setup:
+            se_setup[m] = {}
+            ops_machine[m] = []
+            st_machine[m] = 0
+    for l in range(len(seq)):
+        jt, job, op, m = seq[l]
+        if len(ops_machine[m]) == 0: now = max(st_machine[m], st_job[jt][job])
+        else:
+            setup_time = getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}")
+            now = max(st_machine[m] + setup_time, st_job[jt][job])
+            while True:
+                pass_count = 0
+                for t in range(now - setup_time, now):
+                    if t in t_setup and t_setup[t] == params["s_max"]:
+                        now += 1
+                        break
+                    else: pass_count += 1
+                if pass_count == setup_time: break
+
+            if setup_time != 0:
+                se_setup[m][l] = [now - setup_time, now]
+                for t in range(se_setup[m][l][0], se_setup[m][l][1]):
+                    if t not in t_setup: t_setup[t] = 1
+                    else: t_setup[t] += 1
+            s_tot += setup_time
+        se_process[jt][job][op].append(now)
+        ops_machine[m] = (jt, op)
+        st_machine[m], st_job[jt][job] = [now + getattr(process, f"{jt}{op}") for _ in range(2)]
+        p_tot += getattr(process, f"{jt}{op}")
+        se_process[jt][job][op].append(st_machine[m])
+
+    f_u = 0
+    for jt in ini_set.keys():
+        for job in ini_set[jt]["jobs"]:
+            for op in ini_set[jt]["ops"]:
+                if params["T"] >= se_process[jt][job][op][1]:
+                    f_u += se_process[jt][job][op][1] - se_process[jt][job][op][0]
+                elif se_process[jt][job][op][0] <= params["T"] < se_process[jt][job][op][1]:
+                    f_u += params["T"] - se_process[jt][job][op][0]
+                else: break
+    f_u /= (len(ops_machine) * params["T"])
+    f_s = 0
+    f_c = {}
+    for m in se_setup:
+        f_c[m] = 0
+        for l in se_setup[m]:
+            if params["T"] >= se_setup[m][l][1]:
+                f_s += se_setup[m][l][1] - se_setup[m][l][0]
+                f_c[m] += 1
+            elif se_setup[m][l][0] <= params["T"] < se_setup[m][l][1]:
+                f_s += params["T"] - se_setup[m][l][0]
+                f_c[m] += 1
+            else: break
+    f_s /= (len(ops_machine) * params["T"])
+    f_i = 1 - f_u - f_s
+    f_b = max(st_machine.values()) / min(st_machine.values()) - 1
+
+    alt = (sum(st_machine[m] for m in st_machine) - p_tot) / len(st_machine)
+    awt = (sum(st_job[jt][job] for jt in ini_set.keys() for job in ini_set[jt]["jobs"]) - p_tot - s_tot) / sum(len(ini_set[jt]["jobs"]) for jt in ini_set.keys())
+    return seq, (params["w_gaso"] * alt + (1 - params["w_gaso"]) * awt, f_u, f_s, f_c, f_i, f_b), se_process, se_setup
+
+def crossing(points, pr1, pr2, apx=True):
+    for idx in points:
+        jt1, job1, op1, _ = pr1[idx]
+        for jt2, job2, op2, m in pr2:
+            if jt1 == jt2 and job1 == job2 and op1 == op2:
+                if apx: pr1[idx] = (jt1, job1, op1, m)
+                pr2.remove((jt2, job2, op2, m))
+                break
+    return [pr1[i] if i in points else pr2.pop(0) for i in range(len(pr1))]
+
+def crossover(mating_pool, cr):
+
+    index = list(range(params["mating_pool"]))
+
+    if cr == 1: # Based on Job Type
+        pr1, pr2 = [mating_pool[pr][0].copy() for pr in rd.choice(index, size=2, replace=False)]
+        chosen_jt = pr1[rd.randint(len(pr1))][0]
+        points = [idx for idx in range(len(pr1)) if pr1[idx][0] == chosen_jt]
+        child = crossing(points, pr1, pr2, apx=False)
+    else:
+        if cr == 2: # Based on F_c(# of Setup Change)
+            index.sort(key=lambda idx:sum(mating_pool[idx][1][3].values()))
+        elif cr == 3: # Based on F_b(Degree of Machine Load)
+            index.sort(key=lambda idx:-mating_pool[idx][1][5])
+        elif cr == 4: # Based on F_i(Degree of Idle Time)
+            index.sort(key=lambda idx:mating_pool[idx][1][4])
+        else: pass # Do not reach
+
+        pr1, pr2 = [mating_pool[pr][0].copy() for pr in (rd.choice(index[:max(1, int(params["mating_pool"] * params["K"]))]), rd.choice(index[-max(1, int(params["mating_pool"] * params["K"])):]))]
+        child = crossing(list(range(len(pr1))), pr1, pr2)
+    return child
+
+def mutation(process, setup, ini_set, machines, seq, cr):
+    seq, (obj, f_u, f_s, f_c, f_i, f_b), se_process, se_setup = seq
+    seq = seq.copy()
+    if cr == 1:
+        random_idx = rd.randint(len(seq))
+        jt, job, op, m = seq.pop(random_idx)
+        place_in_job = list(ini_set[jt]["ops"]).index(op)
+        if place_in_job == 0:
+            if len(list(ini_set[jt]["ops"])) > 1:
+                for l in range(random_idx, len(seq)):
+                    if seq[l][0] == jt and seq[l][1] == job and seq[l][2] == list(ini_set[jt]["ops"])[place_in_job + 1]:
+                        next_idx = l
+                        break
+            else: next_idx = len(seq) + 1
+            if next_idx == 0:
+                print("Only First Able")
+                seq.insert(0, (jt, job, op, m))
+            else: seq.insert(rd.choice([i for i in range(next_idx + 1) if i != random_idx]), (jt, job, op, m))
+
+        elif place_in_job == len(ini_set[jt]["ops"]) - 1:
+            for l in range(random_idx - 1, -1, -1):
+                if seq[l][0] == jt and seq[l][1] == job and seq[l][2] == list(ini_set[jt]["ops"])[place_in_job - 1]:
+                    prior_idx = l
+                    break
+            if prior_idx == len(seq) - 1: seq.append((jt, job, op, m))
+            else: seq.insert(rd.choice([i for i in range(prior_idx + 1, len(seq) + 1) if i != random_idx]), (jt, job, op, m))
+
+        else:
+            for l in range(random_idx - 1, -1, -1):
+                if seq[l][0] == jt and seq[l][1] == job and seq[l][2] == list(ini_set[jt]["ops"])[place_in_job - 1]:
+                    prior_idx = l
+                    break
+            for l in range(random_idx, len(seq)):
+                if seq[l][0] == jt and seq[l][1] == job and seq[l][2] == list(ini_set[jt]["ops"])[place_in_job + 1]:
+                    next_idx = l
+                    break
+            seq.insert(rd.choice(list(range(prior_idx + 1, next_idx + 1))), (jt, job, op, m))
+    elif cr == 2:
+        chosen_m = max(f_c, key=lambda m : f_c[m])
+        if len(se_setup[chosen_m]) != 0:
+            chosen_idx = rd.choice(list(se_setup[chosen_m]))
+            chosen_jt, chosen_job, chosen_op, _ = seq[chosen_idx]
+            alternative_m = rd.permutation([m for m in ini_set[chosen_jt]["ops"][chosen_op] if m != chosen_m]).tolist()
+            if len(alternative_m) != 0:
+                for m in alternative_m:
+                    go_break = False
+                    seq_tmp = seq.copy()
+                    seq_tmp[chosen_idx] = (chosen_jt, chosen_job, chosen_op, m)
+
+                    prior_op_found = False
+
+                    for prior_idx in range(chosen_idx - 1, -1, -1):
+                        if seq_tmp[prior_idx][3] == m:
+                            prior_op_found = True
+                            if getattr(setup, f"{seq_tmp[prior_idx][0]}{seq_tmp[prior_idx][2]}{seq_tmp[chosen_idx][0]}{seq_tmp[chosen_idx][2]}") == 0:
+                                seq = seq_tmp.copy()
+                                go_break = True
+                            break
+                    if not prior_op_found:
+                        seq = seq_tmp.copy()
+                        go_break = True
+                    if go_break: break
+    elif cr == 3:
+        using_machine = []
+        for _, _, _, m in seq:
+            if m not in using_machine:
+                using_machine.append(m)
+        using_machine.sort(key=lambda using_m:-sum(getattr(process, f"{jt}{op}") for jt, _, op, m in seq if m == using_m))
+        from_m = rd.choice(using_machine[:max(1, int(len(using_machine) * params["K"]))])
+        to_m = min(machines, key=lambda m:sum(1 for sche in seq if m==sche[3]))
+
+        for idx in rd.permutation(list(range(len(seq)))):
+            jt, job, op, m = seq[idx]
+            if m == from_m and to_m in ini_set[jt]["ops"][op]:
+                seq[idx] = (jt, job, op, to_m)
+                break
+
+    elif cr == 4:
+        using_machine = []
+        for sche in seq:
+            if sche[3] not in using_machine:
+                using_machine.append(sche[3])
+        t_p, t_s = {}, {}
+        for tmp_m in using_machine:
+            t_p[tmp_m], t_s[tmp_m] = 0, 0
+            for jt, job, op, m in seq:
+                if m == tmp_m:
+                    if params["T"] >= se_process[jt][job][op][1]:
+                        t_p[tmp_m] += se_process[jt][job][op][1] - se_process[jt][job][op][0]
+                    elif se_process[jt][job][op][0] <= params["T"] < se_process[jt][job][op][1]:
+                        t_p[tmp_m] += params["T"] - se_process[jt][job][op][0]
+                    else: pass # Do not reach
+            for l in se_setup[tmp_m]:
+                if params["T"] >= se_setup[tmp_m][l][1]:
+                    t_s[tmp_m] += se_setup[tmp_m][l][1] - se_setup[tmp_m][l][0]
+                elif se_setup[tmp_m][l][0] <= params["T"] < se_setup[tmp_m][l][1]:
+                    t_s[tmp_m] += params["T"] - se_setup[tmp_m][l][0]
+                else: break
+        using_machine.sort(key=lambda m:t_p[m] + t_s[m])
+        from_m = rd.choice(using_machine[:max(1, int(len(using_machine) * params["K"]))])
+
+        for idx in rd.permutation(list(range(len(seq)))):
+            jt, job, op, m = seq[idx]
+            if seq[idx][3] == from_m and list(ini_set[jt]["ops"]).index(op) != 0:
+                for first_idx in range(len(seq)):
+                    first_jt, first_job, first_op, first_m = seq[first_idx]
+                    if first_jt == jt and first_job == job and list(ini_set[jt]["ops"]).index(first_op) == 0:
+                        seq.insert(0, seq.pop(first_idx))
+                        break
+                break
+    else: pass # Do not reach
+    return seq
+
 def first_stage(process, setup, ini_set, machines, seq):
-    ops_machine, st_machine, p_tot, s_tot = {}, {}, 0, 0
+    ops_machine, st_machine = {}, {}
     for m in machines:
         ops_machine[m], st_machine[m] = [], 0
     st_job = {jt : {job : 0 for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
@@ -32,86 +256,29 @@ def first_stage(process, setup, ini_set, machines, seq):
                 now.append(max(st_machine[m], st_job[jt][job]))
             else:
                 now.append(max(st_machine[m] + getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}"), st_job[jt][job]))
-                s_tot += getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}")
         select_m = eligible_m[now.index(min(now))]
         ops_machine[select_m] = (jt, op)
         st_machine[select_m], st_job[jt][job] = [now[eligible_m.index(select_m)] + getattr(process, f"{jt}{op}") for _ in range(2)]
-        p_tot += getattr(process, f"{jt}{op}")
         seq[l] = (jt, job, op, select_m)
-    alt = (sum(st_machine[m] for m in machines) - p_tot) / len(machines)
-    awt = (sum(st_job[jt][job] for jt in ini_set.keys() for job in ini_set[jt]["jobs"]) - p_tot - s_tot) / sum(len(ini_set[jt]["jobs"]) for jt in ini_set.keys())
-    return seq, params["w"] * alt + (1 - params["w"]) * awt
+    return objective(process, setup, ini_set, seq)
 
-def second_stage(process, setup, ini_set, machines, seq, pr2):
-    way_cross = rd.randint(2)
-    if way_cross == 0:  # SCO : Single-Point Crossover Operator
-        seq = crossover([i for i in range(rd.randint(1, len(seq)))], seq, pr2)
-
-    elif way_cross == 1:  # JCO : Job(Job Type) Crossover Operator
-        seq = crossover([l for l in range(len(seq)) if seq[l][0] in rd.choice(list(ini_set), size=1)], seq, pr2)
-
-    elif way_cross == 2:  # ACO : Assignment Crossover
-        for l in range(len(seq)):
-            jt_1, job_1, op_1 = seq[l][0], seq[l][1], seq[l][2]
-            for jt_2, job_2, op_2, m_2 in pr2:
-                if jt_1 == jt_2 and job_1 == job_2 and op_1 == op_2:
-                    seq[l] = (jt_1, job_1, op_1, m_2)
-                    break
-    else:  # Do not reach
-        seq = 0
-
-    way_mutation = rd.randint(2)
-    if way_mutation == 0: # OSM : Operation Swaping Mutation
-        idx1, idx2 = 0, 0
-        while seq[idx1][1] == seq[idx2][1] and seq[idx1][0] == seq[idx2][0]:
-            idx1 = rd.randint(len(seq) - 1)
-            idx2 = idx1 + 1
-        seq[idx1], seq[idx2] = seq[idx2], seq[idx1]
-
-    elif way_mutation == 1: # AAM : Assignment Altering Mutation
-        idx = rd.randint(len(seq))
-        jt, job, op, m_tmp = seq[idx]
-        eligible_m = ini_set[jt]["ops"][op]
-        if len(eligible_m) > 1:
-            select_m = m_tmp
-            while select_m == m_tmp:
-                select_m = rd.choice(eligible_m)
-            seq[idx] = (jt, job, op, select_m)
-    else:  # Do not reach
-        seq = 0
-
-    ops_machine, st_machine, p_tot, s_tot = {}, {}, 0, 0
-    for m in machines:
-        ops_machine[m] = []
-        st_machine[m] = 0
-    st_job = {jt: {job: 0 for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
-    for l in range(len(seq)):
-        jt, job, op, m = seq[l]
-        if len(ops_machine[m]) == 0:
-            now = max(st_machine[m], st_job[jt][job])
-        else:
-            now = max(st_machine[m] + getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}"), st_job[jt][job])
-            s_tot += getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}")
-        ops_machine[m] = (jt, op)
-        st_machine[m], st_job[jt][job] = [now + getattr(process, f"{jt}{op}") for _ in range(2)]
-        p_tot += getattr(process, f"{jt}{op}")
-
-    alt = (sum(st_machine[m] for m in machines) - p_tot) / len(machines)
-    awt = (sum(st_job[jt][job] for jt in ini_set.keys() for job in ini_set[jt]["jobs"]) - p_tot - s_tot) / sum(len(ini_set[jt]["jobs"]) for jt in ini_set.keys())
-    return seq, params["w"] * alt + (1 - params["w"]) * awt
+def second_stage(process, setup, ini_set, machines, mating_pool, cr):
+    return crossover(mating_pool.copy(), cr) if rd.random() < 0.5 else mutation(process, setup, ini_set, machines, mating_pool[rd.choice(list(range(params["mating_pool"])))], cr)
 
 def generate_case(process, setup, ini_set, machines):
     history = []
     ini_pop = [(jt, job, op) for jt in ini_set.keys() for job in ini_set[jt]["jobs"] for op in ini_set[jt]["ops"]]
-    pops = sorted([first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, rd.permutation(ini_pop).tolist())) for _ in range(params["pop_size"])], key=lambda case: case[1])
+    pops = sorted([first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, rd.permutation(ini_pop).tolist())) for _ in range(params["pop_size"])], key=lambda case: (case[1][0], case[1][1]))
+    cr = 1
 
     for gen in range(1, params["num_of_gens"] + 1):
-        mating_pool = [select_pop(pops) for _ in range(params["mating_pool"])]
-        indices = list(range(params["mating_pool"]))
+        mating_pool = [select_mp(pops) for _ in range(params["mating_pool"])]
+        offsprings = []
         for _ in range(params["num_offs"]):
-            mom, dad = rd.choice(indices, size=2, replace=False)
-            pops.append(second_stage(process, setup, ini_set, machines, mating_pool[mom].copy(), mating_pool[dad].copy(), params["w"]))
-        pops = sorted(pops, key=lambda case: case[1])[:params["pop_size"]]
+            offspring = second_stage(process, setup, ini_set, machines, mating_pool, cr)
+
+            offsprings.append(objective(process, setup, ini_set, offspring))
+        offsprings.sort(key=lambda offs: (offs[1][0], offs[1][1]))
 
         history.append(pops[0][1])
     return pops
