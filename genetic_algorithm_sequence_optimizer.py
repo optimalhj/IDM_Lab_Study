@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 # Parameter Input
 num_jts ,max_num_job, max_num_op, num_machines, max_time = 4, 5, 5, 7, 9
-params = {"pop_size": 5, "num_of_gens": 20, "mating_pool": 20, "num_offs": 10, "o_max": 20, "s_max": 2, "T": 20, "w": 0.5, "K": 0.25}
+params = {"pop_size": 5, "num_of_gens": 20, "mating_pool": 20, "num_offs": 10, "s_max": 2, "T": 20, "w": 0.5, "K": 0.25}
 
 def select_mp(populations):
     index = list(range(params["pop_size"]))
@@ -63,7 +63,7 @@ def objective(process, setup, ini_set, machines, seq):
                 elif se_process[jt][job][op][0] <= params["T"] < se_process[jt][job][op][1]:
                     f_u += params["T"] - se_process[jt][job][op][0]
                 else: break
-    f_u /= (len([m for m in machines if len(ops_machine) != 0]) * params["T"])
+    f_u /= (len(ops_machine) * params["T"])
     f_s = 0
     f_c = {}
     for m in se_setup:
@@ -76,7 +76,7 @@ def objective(process, setup, ini_set, machines, seq):
                 f_s += params["T"] - se_setup[m][l][0]
                 f_c[m] += 1
             else: break
-    f_s /= (len([m for m in se_setup if len(ops_machine) != 0]) * params["T"])
+    f_s /= (len(ops_machine) * params["T"])
     f_i = 1 - f_u - f_s
     f_b = max(st_machine.values()) / min(st_machine.values()) - 1
     obj = params["w"] * f_u - (1 - params["w"]) * f_s
@@ -118,19 +118,13 @@ def crossover(mating_pool, cr):
     else:
         if cr == 2: # Based on F_c(# of Setup Change)
             index.sort(key=lambda idx:sum(mating_pool[idx][1][3].values()))
-            pr1 = rd.choice(index[:int(params["mating_pool"] * params["K"])])
-            pr2 = rd.choice(index[params["mating_pool"] - int(params["mating_pool"] * params["K"]):])
+        elif cr == 3: # Based on F_b(Degree of Machine Load)
+            index.sort(key=lambda idx:-mating_pool[idx][1][5])
+        elif cr == 4: # Based on F_i(Degree of Idle Time)
+            index.sort(key=lambda idx:mating_pool[idx][1][4])
+        else: pass # Do not reach
 
-        else:
-            if cr == 3: # Based on F_b(Degree of Machine Load)
-                index.sort(key=lambda idx:-mating_pool[idx][1][5])
-            elif cr == 4: # Based on F_i(Degree of Idle Time)
-                index.sort(key=lambda idx:mating_pool[idx][1][4])
-            else: pass # Do not reach
-            pr1 = rd.choice(index[:int(params["mating_pool"] * params["K"])])
-            if pr1 == len(index) - 1: pr2 = pr1
-            else: pr2 = rd.choice(index[max(params["mating_pool"] - int(params["mating_pool"] * params["K"]), pr1):])
-        pr1, pr2 = [mating_pool[pr][0].copy() for pr in (pr1, pr2)]
+        pr1, pr2 = [mating_pool[pr][0].copy() for pr in (rd.choice(index[:max(1, int(params["mating_pool"] * params["K"]))]), rd.choice(index[-max(1, int(params["mating_pool"] * params["K"])):]))]
         print(f"pr1 : ({len(pr1)})", pr1)
         print(f"pr2 : ({len(pr2)})", pr2)
         child = crossing(list(range(len(pr1))), pr1, pr2)
@@ -201,16 +195,21 @@ def mutation(process, setup, ini_set, machines, seq, cr):
                     go_break = False
                     seq_tmp = seq.copy()
                     seq_tmp[chosen_idx] = (chosen_jt, chosen_job, chosen_op, m)
+
+                    prior_op_found = False
                     print("Change :", seq_tmp[chosen_idx], end=" --> ")
 
                     for prior_idx in range(chosen_idx - 1, -1, -1):
                         if seq_tmp[prior_idx][3] == m:
+                            prior_op_found = True
                             print(getattr(setup, f"{seq_tmp[prior_idx][0]}{seq_tmp[prior_idx][2]}{seq_tmp[chosen_idx][0]}{seq_tmp[chosen_idx][2]}"))
                             if getattr(setup, f"{seq_tmp[prior_idx][0]}{seq_tmp[prior_idx][2]}{seq_tmp[chosen_idx][0]}{seq_tmp[chosen_idx][2]}") == 0:
                                 seq = seq_tmp.copy()
                                 go_break = True
                             break
-                        print("None")
+                    if not prior_op_found:
+                        seq = seq_tmp.copy()
+                        go_break = True
                     if go_break: break
     elif cr == 3:
         using_machine = []
@@ -265,7 +264,7 @@ def mutation(process, setup, ini_set, machines, seq, cr):
 
         for idx in rd.permutation(list(range(len(seq)))):
             jt, job, op, m = seq[idx]
-            if seq[idx][3] == from_m and len(ini_set[jt]["ops"][op]) >= 2 and list(ini_set[jt]["ops"]).index(op) != 0:
+            if seq[idx][3] == from_m and list(ini_set[jt]["ops"]).index(op) != 0:
                 print("Chosen :", (jt, job, op, m), "-->", end=" ")
                 for first_idx in range(len(seq)):
                     first_jt, first_job, first_op, first_m = seq[first_idx]
