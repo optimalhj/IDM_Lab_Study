@@ -1,18 +1,8 @@
 from numpy import random as rd
 
-def select_pop(populations):
-    indices = list(range(len(populations)))
-    way_pop = rd.randint(3)
-
-    if way_pop == 0:  # Binary tournament
-        chosen = populations[min(rd.choice(indices, size=2, replace=False), key=lambda idx : populations[idx][1])]
-    elif way_pop == 1:  # n-Size tournament
-        chosen = populations[min(rd.choice(indices, size=rd.randint(3, max(4, int(len(indices)/2.5))), replace=False), key=lambda idx : populations[idx][1])]
-    elif way_pop == 2:  # Linear ranking
-        chosen = populations[rd.choice(indices, size=1, p=[2 * i / (len(indices) * (len(indices) + 1)) for i in range(len(indices), 0 , -1)])[0]]
-    else:  # Do not reach
-        chosen = []
-    return chosen[0]
+# Parameter Input
+num_jts ,max_num_job, max_num_op, num_machines, max_time = 4, 5, 5, 7, 9
+params = {"pop_size": 5, "num_of_gens": 20, "mating_pool": 20, "num_offs": 10, "s_max": 2, "T": 20, "w": 0.5, "K": 0.25}
 
 def correct_procedure(ini_set, seq):
     info_op = {jt : {job : {op : 0 for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
@@ -29,18 +19,7 @@ def correct_procedure(ini_set, seq):
         seq[i] = (jt, using_job, op)
     return seq
 
-def crossover(points, pr1, pr2):
-    for jt_1, job_1, op_1, _ in [pr1[idx] for idx in points]:
-        for l2 in range(len(pr2)-1, -1, -1):
-            if pr2[l2][0] == jt_1 and pr2[l2][1] == job_1 and pr2[l2][2] == op_1:
-                pr2.pop(l2)
-                break
-    return [pr1[l] if l in points else pr2.pop(0) for l in range(len(pr1))]
-
-def objective(alt, awt, w):
-    return w * alt + (1 - w) * awt
-
-def first_stage(process, setup, ini_set, machines, seq, w):
+def first_stage(process, setup, ini_set, machines, seq):
     ops_machine, st_machine, p_tot, s_tot = {}, {}, 0, 0
     for m in machines:
         ops_machine[m], st_machine[m] = [], 0
@@ -61,9 +40,9 @@ def first_stage(process, setup, ini_set, machines, seq, w):
         seq[l] = (jt, job, op, select_m)
     alt = (sum(st_machine[m] for m in machines) - p_tot) / len(machines)
     awt = (sum(st_job[jt][job] for jt in ini_set.keys() for job in ini_set[jt]["jobs"]) - p_tot - s_tot) / sum(len(ini_set[jt]["jobs"]) for jt in ini_set.keys())
-    return seq, objective(alt, awt, w)
+    return seq, params["w"] * alt + (1 - params["w"]) * awt
 
-def second_stage(process, setup, ini_set, machines, seq, pr2, w):
+def second_stage(process, setup, ini_set, machines, seq, pr2):
     way_cross = rd.randint(2)
     if way_cross == 0:  # SCO : Single-Point Crossover Operator
         seq = crossover([i for i in range(rd.randint(1, len(seq)))], seq, pr2)
@@ -119,16 +98,14 @@ def second_stage(process, setup, ini_set, machines, seq, pr2, w):
 
     alt = (sum(st_machine[m] for m in machines) - p_tot) / len(machines)
     awt = (sum(st_job[jt][job] for jt in ini_set.keys() for job in ini_set[jt]["jobs"]) - p_tot - s_tot) / sum(len(ini_set[jt]["jobs"]) for jt in ini_set.keys())
-    return seq, objective(alt, awt, w)
+    return seq, params["w"] * alt + (1 - params["w"]) * awt
 
-def case_generation(process, setup, ini_set, machines, params):
+def generate_case(process, setup, ini_set, machines):
     history = []
-    ini_pop = tuple([(jt, job, op) for jt in ini_set.keys() for job in ini_set[jt]["jobs"] for op in ini_set[jt]["ops"]])
-    pops = sorted(
-        [first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, rd.permutation(ini_pop).tolist()), params["w"])
-         for _ in range(params["pop_size"])], key=lambda case: case[1])
+    ini_pop = [(jt, job, op) for jt in ini_set.keys() for job in ini_set[jt]["jobs"] for op in ini_set[jt]["ops"]]
+    pops = sorted([first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, rd.permutation(ini_pop).tolist())) for _ in range(params["pop_size"])], key=lambda case: case[1])
 
-    for gen in range(params["num_of_gens"]):
+    for gen in range(1, params["num_of_gens"] + 1):
         mating_pool = [select_pop(pops) for _ in range(params["mating_pool"])]
         indices = list(range(params["mating_pool"]))
         for _ in range(params["num_offs"]):
@@ -143,7 +120,7 @@ class Duration:
     def __init__(self): pass
 class SetUp:
     def __init__(self): pass
-def start(processes, setups, machines_tmp, params):
+def start(processes, setups, machines_tmp):
     process, setup, ini_set, machines = Duration(), SetUp(), {}, []
 
     for jt in processes.keys():
@@ -161,18 +138,14 @@ def start(processes, setups, machines_tmp, params):
         for op_type2 in setups:
             (jt1, op1), (jt2, op2) = op_type1, op_type2
             setattr(setup, f"{jt1}{op1}{jt2}{op2}", setups[(jt1, op1)][(jt2, op2)])
-    case_generation(process, setup, ini_set, machines, params)
+    generate_case(process, setup, ini_set, machines)
 
 def main():
-
-    # Parameter Input
-    params = {"pop_size": 150, "num_of_gens": 5, "mating_pool": 150, "num_offs": 200, "w": 0.5}
-    num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 3, 4, 4, 9
 
     jts = [f"Job_Type{i}" for i in range(1, num_jts + 1)]
     machines = [f"M{i}" for i in range(1, num_machines + 1)]
 
-    processes = {jt : {"jobs":[f"Job{j+1}" for j in range(rd.randint(2,max_num_job+1))], "ops":{f"Op{o+1}" : [sorted(rd.choice(machines, size=rd.randint(1, len(machines)), replace=False),key=lambda machine: machines.index(machine)),rd.randint(2, max_num_op + 1)] for o in range(rd.randint(1, max_num_op + 1))}} for jt in jts}
+    processes = {jt : {"jobs":[f"Job{j+1}" for j in range(rd.randint(2,max_num_job+1))], "ops":{f"Op{o+1}" : [sorted(rd.choice(machines, size=rd.randint(2, len(machines)), replace=False),key=lambda machine: machines.index(machine)),rd.randint(2, max_num_op + 1)] for o in range(rd.randint(1, max_num_op + 1))}} for jt in jts}
 
     op_types = [(jt, op) for jt in jts for op in processes[jt]["ops"]]
     setups = {op1:{op2:0 if op1[0] == op2[0] else rd.randint(1, max(max_time//2, 1) + 1) for op2 in op_types} for op1 in op_types}
@@ -180,10 +153,8 @@ def main():
     for jt in processes.keys():
         print(jt)
         for job in processes[jt]:
-            print("\t", end="")
-            print(job)
-            print("\t", end="")
-            print(processes[jt][job])
+            print(f"\t{job}")
+            print(f"\t{processes[jt][job]}")
         print()
 
     for op1 in setups.keys():
@@ -195,7 +166,7 @@ def main():
 
     print("\n-----------------------------------------------------------------------------------------------------")
 
-    start(processes, setups, machines, params)
+    start(processes, setups, machines)
 
 if __name__ == '__main__':
     main()

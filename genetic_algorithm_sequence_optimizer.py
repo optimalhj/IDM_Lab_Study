@@ -18,7 +18,7 @@ def select_mp(populations):
     else:  # Do not reach
         return []
 
-def objective(process, setup, ini_set, machines, seq):
+def objective(process, setup, ini_set, seq):
     se_process = {jt: {job: {op: [] for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
     st_job = {jt: {job: 0 for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
     se_setup = {}
@@ -279,7 +279,7 @@ def mutation(process, setup, ini_set, machines, seq, cr):
     print("-" * 50)
     return seq
 
-def correct_procedure(process, setup, ini_set, machines, seq):
+def correct_procedure(process, setup, ini_set, seq):
     info_op = {jt : {job : {op : 0 for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
     info_job = {jt: {op: {job: 0 for job in ini_set[jt]["jobs"]} for op in ini_set[jt]["ops"]} for jt in ini_set.keys()}
     for i in range(len(seq)):
@@ -292,7 +292,7 @@ def correct_procedure(process, setup, ini_set, machines, seq):
         using_job = min(ini_set[jt]["jobs"], key=lambda job: info_job[jt][op][job])
         info_job[jt][op][using_job] += 1
         seq[i] = (jt, using_job, op, rd.choice(ini_set[jt]["ops"][op]))
-    return objective(process, setup, ini_set, machines, seq)
+    return objective(process, setup, ini_set, seq)
 
 def graph_gen(final):
 
@@ -349,7 +349,7 @@ def ga(process, setup, ini_set, machines):
         offsprings = []
         for _ in range(params["num_offs"]):
             offspring = crossover(mating_pool.copy(), cr) if rd.random() < 0.5 else mutation(process, setup, ini_set, machines, mating_pool[rd.choice(list(range(params["mating_pool"])))], cr)
-            offsprings.append(objective(process, setup, ini_set, machines, offspring))
+            offsprings.append(objective(process, setup, ini_set, offspring))
         offsprings.sort(key=lambda offs:(-offs[1][0], offs[1][1]))
 
         # seq, (md.ObjVal, f_u.X, f_s.X, f_c, f_i, f_b), se_process, se_setup
