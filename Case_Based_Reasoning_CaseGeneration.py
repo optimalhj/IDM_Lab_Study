@@ -1,9 +1,10 @@
 from numpy import random as rd
 import matplotlib.pyplot as plt
+import mysql.connector
 
 # Parameter Input
 num_jts ,max_num_job, max_num_op, num_machines, max_time = 4, 5, 5, 7, 9
-params = {"pop_size": 5, "num_of_gens": 100, "mating_pool": 20, "num_offs": 10, "s_max": 2, "T": 20, "w_gaso": 0.5, "w_main": 0.4, "K": 0.25}
+params = {"pop_size": 5, "num_of_gens": 200, "mating_pool": 20, "num_offs": 10, "s_max": 2, "T": 20, "w": 0.4, "K": 0.25}
 
 def select_mp(populations):
     index = list(range(params["pop_size"]))
@@ -97,7 +98,7 @@ def objective(process, setup, ini_set, seq):
 
     alt = (sum(st_machine[m] for m in st_machine) - p_tot) / len(st_machine)
     awt = (sum(st_job[jt][job] for jt in ini_set.keys() for job in ini_set[jt]["jobs"]) - p_tot - s_tot) / sum(len(ini_set[jt]["jobs"]) for jt in ini_set.keys())
-    return seq, (params["w_gaso"] * alt + (1 - params["w_gaso"]) * awt, f_u, f_s, f_c, f_i, f_b), se_process, se_setup
+    return seq, ((alt, awt), f_u, f_s, f_c, f_i, f_b), se_process, se_setup
 
 def crossing(points, pr1, pr2, apx=True):
     for idx in points:
@@ -308,31 +309,23 @@ def graph_makespan(best, machines):
 
 def generate_case(process, setup, ini_set, machines):
     ini_pop = [(jt, job, op) for jt in ini_set.keys() for job in ini_set[jt]["jobs"] for op in ini_set[jt]["ops"]]
-    pops = sorted([first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, rd.permutation(ini_pop).tolist())) for _ in range(params["pop_size"])], key=lambda case: (case[1][0], case[1][1]))
+    pops = sorted([first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, rd.permutation(ini_pop).tolist())) for _ in range(params["pop_size"])], key=lambda case: (params["w"] * case[1][0][0] + (1-params["w"]) * case[1][0][1], case[1][1]))
     database, history, cr = [pops[0]], [], 1
 
 
     for gen in range(1, params["num_of_gens"] + 1):
-        print(cr)
         mating_pool = [select_mp(pops) for _ in range(params["mating_pool"])]
         offsprings = []
         for _ in range(params["num_offs"]):
             offspring = second_stage(process, setup, ini_set, machines, mating_pool, cr)
             offsprings.append(objective(process, setup, ini_set, offspring))
-        offsprings.sort(key=lambda offs: (offs[1][0], offs[1][1]))
+        offsprings.sort(key=lambda offs: (params["w"] * offs[1][0][0] + (1-params["w"]) * offs[1][0][1], offs[1][1]))
 
-        # seq, (md.ObjVal, f_u.X, f_s.X, f_c, f_i, f_b), se_process, se_setup
-        print("Pops :\n")
-        for values in pops:
-            print(f"\t{values[1]}")
-        print("\nOffsprings :\n")
-        for values in offsprings:
-            print(f"\t{values[1]}")
-
-        if offsprings[0][1][0] < pops[0][1][0]:
+        if params["w"] * offsprings[0][1][0][0] + (1-params["w"]) * offsprings[0][1][0][1] < params["w"] * pops[0][1][0][0] + (1-params["w"]) * pops[0][1][0][1]:
             cr = 1
-            pops = sorted(pops + offsprings, key=lambda case: (case[1][0], case[1][1]))[:params["pop_size"]]
+            pops = sorted(pops + offsprings, key=lambda case: (params["w"] * case[1][0][0] + (1-params["w"]) * case[1][0][1], case[1][1]))[:params["pop_size"]]
             print("Replaced")
+            database.append(pops[0])
         elif sum(offsprings[0][1][3].values()) > sum(pops[0][1][3].values()):
             cr = 2
         elif offsprings[0][1][5] > pops[0][1][5]:
@@ -346,16 +339,35 @@ def generate_case(process, setup, ini_set, machines):
             print(pop)
         print("*" * 50)
 
-        if pops[0][1][0] < database[0][1][0]:
-            database.append(pops[0])
-        history.append(pops[0][1][0])
+        history.append(params["w"] * pops[0][1][0][0] + (1 - params["w"]) * pops[0][1][0][1])
 
     graph_gen(history)
     graph_makespan(pops[0], machines)
-    print("*" * 50)
     for case in database:
-        print(case[1:], "    ////    ", case[0])
+        print(params["w"] * case[1][0][0] + (1 - params["w"]) * case[1][0][1], case[1:], "    ////    ", case[0])
     return database
+
+def save(database):
+    conn = mysql.connector.connect(user='root', password='gh314wns!')
+    cursor = conn.cursor()
+    cursor.execute("DROP DATABASE IF EXISTS CASE_DATABASE;")
+    cursor.execute("CREATE DATABASE CASE_DATABASE;")
+    cursor.execute("USE CASE_DATABASE;")
+
+    cursor.execute("""
+    CREATE TABLE CASE(
+    h SMALLINT NOT NULL,
+    p SMALLINT NOT NULL,
+    s_o VARCHAR(65535) NOT NULL,
+    alt FLOAT NOT NULL,
+    awt FLOAT NOT NULL,
+    PRIMARY KEY (h));
+    """)
+
+    for h, data in enumerate(database):
+        cursor.execute(f"""
+        INSERT CASE VALUES ({h}, )
+        """)
 
 class Duration:
     def __init__(self): pass
@@ -407,7 +419,9 @@ def main():
 
     print("\n-----------------------------------------------------------------------------------------------------")
 
-    start(processes, setups, machines)
+    database = start(processes, setups, machines)
+    # saving_mysql = save(database)
+    return database
 
 if __name__ == '__main__':
     main()
