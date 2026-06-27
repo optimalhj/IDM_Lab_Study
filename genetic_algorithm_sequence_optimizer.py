@@ -2,7 +2,7 @@ from numpy import random as rd
 import matplotlib.pyplot as plt
 
 # Parameter Input
-num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 2, 3, 5, 9
+num_jts ,max_num_job, max_num_op, num_machines, max_time = 4, 5, 5, 7, 9
 params = {"pop_size": 5, "num_of_gens": 20, "mating_pool": 20, "num_offs": 10, "o_max": 20, "s_max": 2, "T": 20, "w": 0.5, "K": 0.25}
 
 def select_mp(populations):
@@ -31,8 +31,7 @@ def objective(process, setup, ini_set, machines, seq):
             st_machine[m] = 0
     for l in range(len(seq)):
         jt, job, op, m = seq[l]
-        if len(ops_machine[m]) == 0:
-            now = max(st_machine[m], st_job[jt][job])
+        if len(ops_machine[m]) == 0: now = max(st_machine[m], st_job[jt][job])
         else:
             setup_time = getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}")
             now = max(st_machine[m] + setup_time, st_job[jt][job])
@@ -43,16 +42,13 @@ def objective(process, setup, ini_set, machines, seq):
                         now += 1
                         break
                     else: pass_count += 1
-                if pass_count == setup_time:
-                    break
+                if pass_count == setup_time: break
 
             if setup_time != 0:
                 se_setup[m][l] = [now - setup_time, now]
                 for t in range(se_setup[m][l][0], se_setup[m][l][1]):
-                    if t not in t_setup:
-                        t_setup[t] = 1
-                    else:
-                        t_setup[t] += 1
+                    if t not in t_setup: t_setup[t] = 1
+                    else: t_setup[t] += 1
         se_process[jt][job][op].append(now)
         ops_machine[m] = (jt, op)
         st_machine[m], st_job[jt][job] = [now + getattr(process, f"{jt}{op}") for _ in range(2)]
@@ -81,7 +77,7 @@ def objective(process, setup, ini_set, machines, seq):
                 f_c[m] += 1
             else: break
     f_s /= (len([m for m in se_setup if len(ops_machine) != 0]) * params["T"])
-    f_i = 1- f_u - f_s
+    f_i = 1 - f_u - f_s
     f_b = max(st_machine.values()) / min(st_machine.values()) - 1
     obj = params["w"] * f_u - (1 - params["w"]) * f_s
     return seq, (obj, f_u, f_s, f_c, f_i, f_b), se_process, se_setup
@@ -100,12 +96,12 @@ def crossing(points, pr1, pr2, apx=True):
                 pr2.remove((jt2, job2, op2, m))
                 break
 
-    print(f"\n\tpr1 : ({len(points)})", [pr1[i] for i in points])
-    print(f"\tpr2 : ({len(pr2)})", pr2)
+    print(f"\npr1 : ({len(points)})", [pr1[i] for i in points])
+    print(f"pr2 : ({len(pr2)})", pr2)
     return [pr1[i] if i in points else pr2.pop(0) for i in range(len(pr1))]
 
 def crossover(mating_pool, cr):
-    print(f"Crossover Way : CR{cr}")
+    print(f"CR{cr}")
 
     index = list(range(params["mating_pool"]))
 
@@ -144,30 +140,40 @@ def crossover(mating_pool, cr):
     return child
 
 def mutation(process, setup, ini_set, machines, seq, cr):
-    print("Mutation_chosen")
-    print(seq)
+    print(f"MU{cr}", seq, "\n")
     seq, (obj, f_u, f_s, f_c, f_i, f_b), se_process, se_setup = seq
     seq = seq.copy()
     if cr == 1:
         random_idx = rd.randint(len(seq))
         jt, job, op, m = seq.pop(random_idx)
+        print("Pop_op :" ,(jt, job, op, m), " /  Index :", random_idx)
         place_in_job = list(ini_set[jt]["ops"]).index(op)
         if place_in_job == 0:
+            print("First Op Popped")
             if len(list(ini_set[jt]["ops"])) > 1:
                 for l in range(random_idx, len(seq)):
                     if seq[l][0] == jt and seq[l][1] == job and seq[l][2] == list(ini_set[jt]["ops"])[place_in_job + 1]:
                         next_idx = l
+                        print("Next_Op :", seq[next_idx], " /  Index :", next_idx)
                         break
-            else: next_idx = len(seq) + 1
-            if next_idx == 0: seq.insert(0, (jt, job, op, m))
+            else:
+                print("Only one Op, So Every Position Able")
+                next_idx = len(seq) + 1
+            if next_idx == 0:
+                print("Only First Able")
+                seq.insert(0, (jt, job, op, m))
             else: seq.insert(rd.choice([i for i in range(next_idx + 1) if i != random_idx]), (jt, job, op, m))
 
         elif place_in_job == len(ini_set[jt]["ops"]) - 1:
+            print("Final Op Popped")
             for l in range(random_idx - 1, -1, -1):
                 if seq[l][0] == jt and seq[l][1] == job and seq[l][2] == list(ini_set[jt]["ops"])[place_in_job - 1]:
                     prior_idx = l
+                    print("Prior_Op :", seq[prior_idx], " /  Index :", prior_idx)
                     break
-            if prior_idx == len(seq) - 1: seq.append((jt, job, op, m))
+            if prior_idx == len(seq) - 1:
+                print("Only Final Able")
+                seq.append((jt, job, op, m))
             else: seq.insert(rd.choice([i for i in range(prior_idx + 1, len(seq) + 1) if i != random_idx]), (jt, job, op, m))
 
         else:
@@ -179,22 +185,20 @@ def mutation(process, setup, ini_set, machines, seq, cr):
                 if seq[l][0] == jt and seq[l][1] == job and seq[l][2] == list(ini_set[jt]["ops"])[place_in_job + 1]:
                     next_idx = l
                     break
-            if next_idx - prior_idx == 1: seq.insert(next_idx, (jt, job, op, m))
-            else: seq.insert(rd.choice([i for i in range(prior_idx + 1, next_idx + 1)]), (jt, job, op, m))
+            print("Prior_Op :", seq[prior_idx], " /  Index :", prior_idx, "   //   Next_Op :", seq[next_idx], " /  Index :", next_idx)
+            seq.insert(rd.choice(list(range(prior_idx + 1, next_idx + 1))), (jt, job, op, m))
     elif cr == 2:
-        print("MU2")
         chosen_m = max(f_c, key=lambda m : f_c[m])
         print(se_setup[chosen_m])
         if len(se_setup[chosen_m]) != 0:
             chosen_idx = rd.choice(list(se_setup[chosen_m]))
             chosen_jt, chosen_job, chosen_op, _ = seq[chosen_idx]
             alternative_m = rd.permutation([m for m in ini_set[chosen_jt]["ops"][chosen_op] if m != chosen_m]).tolist()
-            print(f"{ini_set[chosen_jt]["ops"][chosen_op]} - {chosen_m} == {alternative_m}")
+            print(f"{ini_set[chosen_jt]["ops"][chosen_op]} - [{chosen_m}] == {alternative_m}")
             if len(alternative_m) != 0:
-
+                print("Origin :", seq[chosen_idx])
                 for m in alternative_m:
                     go_break = False
-                    print("Origin :", seq[chosen_idx])
                     seq_tmp = seq.copy()
                     seq_tmp[chosen_idx] = (chosen_jt, chosen_job, chosen_op, m)
                     print("Change :", seq_tmp[chosen_idx], end=" --> ")
@@ -206,14 +210,13 @@ def mutation(process, setup, ini_set, machines, seq, cr):
                                 seq = seq_tmp.copy()
                                 go_break = True
                             break
-                    if go_break:
-                        break
+                        print("None")
+                    if go_break: break
     elif cr == 3:
-        print("MU3")
         using_machine = []
-        for sche in seq:
-            if sche[3] not in using_machine:
-                using_machine.append(sche[3])
+        for _, _, _, m in seq:
+            if m not in using_machine:
+                using_machine.append(m)
         using_machine.sort(key=lambda using_m:-sum(getattr(process, f"{jt}{op}") for jt, _, op, m in seq if m == using_m))
         print("Using M :", using_machine)
         for using_m in using_machine:
@@ -233,34 +236,32 @@ def mutation(process, setup, ini_set, machines, seq, cr):
                 break
 
     elif cr == 4:
-        print("MU4")
         using_machine = []
         for sche in seq:
             if sche[3] not in using_machine:
                 using_machine.append(sche[3])
-        t_k_p, t_k_s = {}, {}
+        t_p, t_s = {}, {}
         for tmp_m in using_machine:
-            t_k_p[tmp_m], t_k_s[tmp_m] = 0, 0
+            t_p[tmp_m], t_s[tmp_m] = 0, 0
             for jt, job, op, m in seq:
                 if m == tmp_m:
                     if params["T"] >= se_process[jt][job][op][1]:
-                        t_k_p[tmp_m] += se_process[jt][job][op][1] - se_process[jt][job][op][0]
+                        t_p[tmp_m] += se_process[jt][job][op][1] - se_process[jt][job][op][0]
                     elif se_process[jt][job][op][0] <= params["T"] < se_process[jt][job][op][1]:
-                        t_k_p[tmp_m] += params["T"] - se_process[jt][job][op][0]
+                        t_p[tmp_m] += params["T"] - se_process[jt][job][op][0]
                     else: pass # Do not reach
             for l in se_setup[tmp_m]:
                 if params["T"] >= se_setup[tmp_m][l][1]:
-                    t_k_s[tmp_m] += se_setup[tmp_m][l][1] - se_setup[tmp_m][l][0]
+                    t_s[tmp_m] += se_setup[tmp_m][l][1] - se_setup[tmp_m][l][0]
                 elif se_setup[tmp_m][l][0] <= params["T"] < se_setup[tmp_m][l][1]:
-                    t_k_s[tmp_m] += params["T"] - se_setup[tmp_m][l][0]
+                    t_s[tmp_m] += params["T"] - se_setup[tmp_m][l][0]
                 else: break
-        print("t_k_p(0, T) :", t_k_p)
-        print("t_k_s(0, T) :", t_k_s)
-        using_machine.sort(key=lambda m:t_k_p[m] + t_k_s[m])
+        print("t_p(0, T) :", t_p)
+        print("t_s(0, T) :", t_p)
+        using_machine.sort(key=lambda m:t_p[m] + t_s[m])
         print("Using M :", using_machine)
         from_m = rd.choice(using_machine[:max(1, int(len(using_machine) * params["K"]))])
         print("\nFrom :", from_m)
-
 
         for idx in rd.permutation(list(range(len(seq)))):
             jt, job, op, m = seq[idx]
@@ -272,8 +273,10 @@ def mutation(process, setup, ini_set, machines, seq, cr):
                         print(seq[first_idx])
                         seq.insert(0, seq.pop(first_idx))
                         break
-
+                break
     else: pass # Do not reach
+    print(f"\nchd : ({len(seq)})", seq)
+    print("-" * 50)
     return seq
 
 def correct_procedure(process, setup, ini_set, machines, seq):
@@ -336,7 +339,7 @@ def ga(process, setup, ini_set, machines):
     history = []
     ini_pop = [(jt, job, op) for jt in ini_set.keys() for job in ini_set[jt]["jobs"] for op in ini_set[jt]["ops"]]
     pops = sorted([correct_procedure(process, setup, ini_set, machines, rd.permutation(ini_pop).tolist()) for _ in range(params["pop_size"])], key=lambda case:-case[1][0])
-    print("0_result")
+    print("Initial_Population")
     for pop in pops:
         print(pop)
     print("*"*50)
@@ -369,7 +372,7 @@ def ga(process, setup, ini_set, machines):
             cr = 4
         else:
             cr = 1
-        print(f"{gen}_reuslt")
+        print(f"\nGeneration_{gen}")
         for pop in pops:
             print(pop)
         print("*"*50)
