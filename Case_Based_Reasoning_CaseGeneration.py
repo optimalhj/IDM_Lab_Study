@@ -1,8 +1,9 @@
 from numpy import random as rd
+import matplotlib.pyplot as plt
 
 # Parameter Input
 num_jts ,max_num_job, max_num_op, num_machines, max_time = 4, 5, 5, 7, 9
-params = {"pop_size": 5, "num_of_gens": 20, "mating_pool": 20, "num_offs": 10, "s_max": 2, "T": 20, "w_gaso": 0.5, "w_main": 0.4, "K": 0.25}
+params = {"pop_size": 5, "num_of_gens": 100, "mating_pool": 20, "num_offs": 10, "s_max": 2, "T": 20, "w_gaso": 0.5, "w_main": 0.4, "K": 0.25}
 
 def select_mp(populations):
     index = list(range(params["pop_size"]))
@@ -145,7 +146,6 @@ def mutation(process, setup, ini_set, machines, seq, cr):
                         break
             else: next_idx = len(seq) + 1
             if next_idx == 0:
-                print("Only First Able")
                 seq.insert(0, (jt, job, op, m))
             else: seq.insert(rd.choice([i for i in range(next_idx + 1) if i != random_idx]), (jt, job, op, m))
 
@@ -265,23 +265,97 @@ def first_stage(process, setup, ini_set, machines, seq):
 def second_stage(process, setup, ini_set, machines, mating_pool, cr):
     return crossover(mating_pool.copy(), cr) if rd.random() < 0.5 else mutation(process, setup, ini_set, machines, mating_pool[rd.choice(list(range(params["mating_pool"])))], cr)
 
+def graph_gen(final):
+
+    plt.plot([f"Gen{i+1}" for i in range(len(final))], final)
+
+    plt.xticks(rotation=45, fontsize=0.5)
+    plt.title("Objective of FJSP")
+
+    plt.xlabel("Gen")
+    plt.ylabel("Objective")
+
+    plt.show()
+
+def graph_makespan(best, machines):
+    seq, obj, se_process, se_setup = best
+    _, ax = plt.subplots()
+    s_job, s_machine, m_tmp = [(jt, job) for jt in se_process.keys() for job in se_process[jt].keys()], {}, {}
+    for m in machines:
+        ax.barh(m, 0, left=0)
+        s_machine[m] = 0
+        m_tmp[m] = []
+
+    for l in range(len(seq)):
+        jt, job, op, m = seq[l]
+        operating = se_process[jt][job][op][1] - se_process[jt][job][op][0]
+        start_process = se_process[jt][job][op][0]
+        ax.barh(m, operating, left=start_process, color=plt.get_cmap('tab20', len(s_job))(list(s_job).index((jt, job))), edgecolor='black')
+        ax.text(start_process + operating / 2, m, f"{jt}\n{job}\n{op}\n({operating})", va='center', ha='center', color='black', fontsize=5)
+
+    for m in se_setup.keys():
+        for st_setup, ed_setup in se_setup[m].values():
+            setup_ing = ed_setup - st_setup
+            if round(setup_ing) != 0:
+                ax.barh(m, setup_ing, left=st_setup, color='white', edgecolor='black')
+    ax.set_xticks([i for i in range(int(max(se_process[jt][job][op][1] for jt in se_process.keys() for job in se_process[jt] for op in se_process[jt][job]))+2)])
+    ax.tick_params(axis='x', labelsize=5)
+    ax.set_yticks(range(len(machines)))
+    ax.set_yticklabels(machines)
+    ax.set_xlabel("Time")
+    ax.set_title("Makespan_Result")
+    plt.show()
+
 def generate_case(process, setup, ini_set, machines):
-    history = []
     ini_pop = [(jt, job, op) for jt in ini_set.keys() for job in ini_set[jt]["jobs"] for op in ini_set[jt]["ops"]]
     pops = sorted([first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, rd.permutation(ini_pop).tolist())) for _ in range(params["pop_size"])], key=lambda case: (case[1][0], case[1][1]))
-    cr = 1
+    database, history, cr = [pops[0]], [], 1
+
 
     for gen in range(1, params["num_of_gens"] + 1):
+        print(cr)
         mating_pool = [select_mp(pops) for _ in range(params["mating_pool"])]
         offsprings = []
         for _ in range(params["num_offs"]):
             offspring = second_stage(process, setup, ini_set, machines, mating_pool, cr)
-
             offsprings.append(objective(process, setup, ini_set, offspring))
         offsprings.sort(key=lambda offs: (offs[1][0], offs[1][1]))
 
-        history.append(pops[0][1])
-    return pops
+        # seq, (md.ObjVal, f_u.X, f_s.X, f_c, f_i, f_b), se_process, se_setup
+        print("Pops :\n")
+        for values in pops:
+            print(f"\t{values[1]}")
+        print("\nOffsprings :\n")
+        for values in offsprings:
+            print(f"\t{values[1]}")
+
+        if offsprings[0][1][0] < pops[0][1][0]:
+            cr = 1
+            pops = sorted(pops + offsprings, key=lambda case: (case[1][0], case[1][1]))[:params["pop_size"]]
+            print("Replaced")
+        elif sum(offsprings[0][1][3].values()) > sum(pops[0][1][3].values()):
+            cr = 2
+        elif offsprings[0][1][5] > pops[0][1][5]:
+            cr = 3
+        elif offsprings[0][1][4] > pops[0][1][4]:
+            cr = 4
+        else:
+            cr = 1
+        print(f"\nGeneration_{gen}")
+        for pop in pops:
+            print(pop)
+        print("*" * 50)
+
+        if pops[0][1][0] < database[0][1][0]:
+            database.append(pops[0])
+        history.append(pops[0][1][0])
+
+    graph_gen(history)
+    graph_makespan(pops[0], machines)
+    print("*" * 50)
+    for case in database:
+        print(case[1:], "    ////    ", case[0])
+    return database
 
 class Duration:
     def __init__(self): pass
@@ -305,7 +379,7 @@ def start(processes, setups, machines_tmp):
         for op_type2 in setups:
             (jt1, op1), (jt2, op2) = op_type1, op_type2
             setattr(setup, f"{jt1}{op1}{jt2}{op2}", setups[(jt1, op1)][(jt2, op2)])
-    generate_case(process, setup, ini_set, machines)
+    return generate_case(process, setup, ini_set, machines)
 
 def main():
 
