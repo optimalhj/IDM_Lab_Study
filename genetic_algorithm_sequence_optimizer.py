@@ -208,6 +208,7 @@ def mutation(process, setup, ini_set, machines, seq, cr):
                                 go_break = True
                             break
                     if not prior_op_found:
+                        print("None")
                         seq = seq_tmp.copy()
                         go_break = True
                     if go_break: break
