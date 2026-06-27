@@ -1,7 +1,5 @@
 from numpy import random as rd
 import matplotlib.pyplot as plt
-import gurobipy as gp
-from gurobipy import GRB
 
 # Parameter Input
 num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 2, 3, 5, 9
@@ -26,10 +24,11 @@ def objective(process, setup, ini_set, machines, seq):
     se_setup = {}
     ops_machine, st_machine = {}, {}
     t_setup = {}
-    for m in machines:
-        se_setup[m] = {}
-        ops_machine[m] = []
-        st_machine[m] = 0
+    for _, _, _, m in seq:
+        if m not in se_setup:
+            se_setup[m] = {}
+            ops_machine[m] = []
+            st_machine[m] = 0
     for l in range(len(seq)):
         jt, job, op, m = seq[l]
         if len(ops_machine[m]) == 0:
@@ -58,10 +57,7 @@ def objective(process, setup, ini_set, machines, seq):
         ops_machine[m] = (jt, op)
         st_machine[m], st_job[jt][job] = [now + getattr(process, f"{jt}{op}") for _ in range(2)]
         se_process[jt][job][op].append(st_machine[m])
-    for m in machines:
-        if len(ops_machine[m]) == 0:
-            se_setup.pop(m)
-            st_machine.pop(m)
+
     f_u = 0
     for jt in ini_set.keys():
         for job in ini_set[jt]["jobs"]:
@@ -218,10 +214,65 @@ def mutation(process, setup, ini_set, machines, seq, cr):
         for sche in seq:
             if sche[3] not in using_machine:
                 using_machine.append(sche[3])
-        using_machine.sort(key=lambda using_m:sum(getattr(process, f"{jt}{op}") for jt, _, op, m in seq if m == using_m))
-        for using_m in sorted(using_machine):
-            print(using_m, ":", sum(getattr(process, f"{jt}{op}") for jt, _, op, m in seq if m == using_m))
+        using_machine.sort(key=lambda using_m:-sum(getattr(process, f"{jt}{op}") for jt, _, op, m in seq if m == using_m))
         print("Using M :", using_machine)
+        for using_m in using_machine:
+            print(using_m, ":", sum(getattr(process, f"{jt}{op}") for jt, _, op, m in seq if m == using_m), end= " / ")
+        from_m = rd.choice(using_machine[:max(1, int(len(using_machine) * params["K"]))])
+        print("\nFrom :", from_m)
+        to_m = min(machines, key=lambda m:sum(1 for sche in seq if m==sche[3]))
+        for m in machines:
+            print(m, ":", sum(1 for sche in seq if m==sche[3]), end= " / ")
+        print("\n To  :", to_m)
+
+        for idx in rd.permutation(list(range(len(seq)))):
+            jt, job, op, m = seq[idx]
+            if m == from_m and to_m in ini_set[jt]["ops"][op]:
+                seq[idx] = (jt, job, op, to_m)
+                print(f"{(jt, job, op, m)} -> {seq[idx]}")
+                break
+
+    elif cr == 4:
+        print("MU4")
+        using_machine = []
+        for sche in seq:
+            if sche[3] not in using_machine:
+                using_machine.append(sche[3])
+        t_k_p, t_k_s = {}, {}
+        for tmp_m in using_machine:
+            t_k_p[tmp_m], t_k_s[tmp_m] = 0, 0
+            for jt, job, op, m in seq:
+                if m == tmp_m:
+                    if params["T"] >= se_process[jt][job][op][1]:
+                        t_k_p[tmp_m] += se_process[jt][job][op][1] - se_process[jt][job][op][0]
+                    elif se_process[jt][job][op][0] <= params["T"] < se_process[jt][job][op][1]:
+                        t_k_p[tmp_m] += params["T"] - se_process[jt][job][op][0]
+                    else: pass # Do not reach
+            for l in se_setup[tmp_m]:
+                if params["T"] >= se_setup[tmp_m][l][1]:
+                    t_k_s[tmp_m] += se_setup[tmp_m][l][1] - se_setup[tmp_m][l][0]
+                elif se_setup[tmp_m][l][0] <= params["T"] < se_setup[tmp_m][l][1]:
+                    t_k_s[tmp_m] += params["T"] - se_setup[tmp_m][l][0]
+                else: break
+        print("t_k_p(0, T) :", t_k_p)
+        print("t_k_s(0, T) :", t_k_s)
+        using_machine.sort(key=lambda m:t_k_p[m] + t_k_s[m])
+        print("Using M :", using_machine)
+        from_m = rd.choice(using_machine[:max(1, int(len(using_machine) * params["K"]))])
+        print("\nFrom :", from_m)
+
+
+        for idx in rd.permutation(list(range(len(seq)))):
+            jt, job, op, m = seq[idx]
+            if seq[idx][3] == from_m and len(ini_set[jt]["ops"][op]) >= 2 and list(ini_set[jt]["ops"]).index(op) != 0:
+                print("Chosen :", (jt, job, op, m), "-->", end=" ")
+                for first_idx in range(len(seq)):
+                    first_jt, first_job, first_op, first_m = seq[first_idx]
+                    if first_jt == jt and first_job == job and list(ini_set[jt]["ops"]).index(first_op) == 0:
+                        print(seq[first_idx])
+                        seq.insert(0, seq.pop(first_idx))
+                        break
+
     else: pass # Do not reach
     return seq
 
