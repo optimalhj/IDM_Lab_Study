@@ -1,5 +1,4 @@
 from numpy import random as rd
-import matplotlib.pyplot as plt
 import mysql.connector
 
 # Parameter Input
@@ -266,52 +265,10 @@ def first_stage(process, setup, ini_set, machines, seq):
 def second_stage(process, setup, ini_set, machines, mating_pool, cr):
     return crossover(mating_pool.copy(), cr) if rd.random() < 0.5 else mutation(process, setup, ini_set, machines, mating_pool[rd.choice(list(range(params["mating_pool"])))], cr)
 
-def graph_gen(final):
-
-    plt.plot([f"Gen{i+1}" for i in range(len(final))], final)
-
-    plt.xticks(rotation=45, fontsize=0.5)
-    plt.title("Objective of FJSP")
-
-    plt.xlabel("Gen")
-    plt.ylabel("Objective")
-
-    plt.show()
-
-def graph_makespan(best, machines):
-    seq, obj, se_process, se_setup = best
-    _, ax = plt.subplots()
-    s_job, s_machine, m_tmp = [(jt, job) for jt in se_process.keys() for job in se_process[jt].keys()], {}, {}
-    for m in machines:
-        ax.barh(m, 0, left=0)
-        s_machine[m] = 0
-        m_tmp[m] = []
-
-    for l in range(len(seq)):
-        jt, job, op, m = seq[l]
-        operating = se_process[jt][job][op][1] - se_process[jt][job][op][0]
-        start_process = se_process[jt][job][op][0]
-        ax.barh(m, operating, left=start_process, color=plt.get_cmap('tab20', len(s_job))(list(s_job).index((jt, job))), edgecolor='black')
-        ax.text(start_process + operating / 2, m, f"{jt}\n{job}\n{op}\n({operating})", va='center', ha='center', color='black', fontsize=5)
-
-    for m in se_setup.keys():
-        for st_setup, ed_setup in se_setup[m].values():
-            setup_ing = ed_setup - st_setup
-            if round(setup_ing) != 0:
-                ax.barh(m, setup_ing, left=st_setup, color='white', edgecolor='black')
-    ax.set_xticks([i for i in range(int(max(se_process[jt][job][op][1] for jt in se_process.keys() for job in se_process[jt] for op in se_process[jt][job]))+2)])
-    ax.tick_params(axis='x', labelsize=5)
-    ax.set_yticks(range(len(machines)))
-    ax.set_yticklabels(machines)
-    ax.set_xlabel("Time")
-    ax.set_title("Makespan_Result")
-    plt.show()
-
 def generate_case(process, setup, ini_set, machines):
     ini_pop = [(jt, job, op) for jt in ini_set.keys() for job in ini_set[jt]["jobs"] for op in ini_set[jt]["ops"]]
     pops = sorted([first_stage(process, setup, ini_set, machines, correct_procedure(ini_set, rd.permutation(ini_pop).tolist())) for _ in range(params["pop_size"])], key=lambda case: (params["w"] * case[1][0][0] + (1-params["w"]) * case[1][0][1], case[1][1]))
-    database, history, cr = [pops[0]], [], 1
-
+    database, cr = [pops[0]], 1
 
     for gen in range(1, params["num_of_gens"] + 1):
         mating_pool = [select_mp(pops) for _ in range(params["mating_pool"])]
@@ -338,10 +295,6 @@ def generate_case(process, setup, ini_set, machines):
             print(pop)
         print("*" * 50)
 
-        history.append(params["w"] * pops[0][1][0][0] + (1 - params["w"]) * pops[0][1][0][1])
-
-    graph_gen(history)
-    graph_makespan(pops[0], machines)
     for case in database:
         print(params["w"] * case[1][0][0] + (1 - params["w"]) * case[1][0][1], case[1:], "    ////    ", case[0])
     return database
