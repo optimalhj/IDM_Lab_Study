@@ -2,8 +2,8 @@ from numpy import random as rd
 import mysql.connector
 
 # Parameter Input
-num_jts ,max_num_job, max_num_op, num_machines, max_time = 4, 5, 5, 7, 9
-params = {"pop_size": 5, "num_of_gens": 200, "mating_pool": 20, "num_offs": 10, "s_max": 2, "T": 20, "w": 0.4, "K": 0.25}
+num_jts ,max_num_job, max_num_op, num_machines, max_time = 12, 20, 80, 30, 9
+params = {"pop_size": 50, "num_of_gens": 200, "mating_pool": 100, "num_offs": 45, "s_max": 5, "T": 100, "w": 0.4, "K": 0.25}
 
 def select_mp(populations):
     index = list(range(params["pop_size"]))
@@ -15,8 +15,7 @@ def select_mp(populations):
         return populations[min(rd.choice(index, size=rd.randint(3, max(4, int(params["pop_size"] / 2.5))), replace=False), key=lambda idx: populations[idx][1][0])]
     elif way_pop == 2:  # Linear ranking
         return populations[rd.choice(index, size=1, p=[2 * i / (params["pop_size"] * (params["pop_size"] + 1)) for i in range(params["pop_size"], 0, -1)])[0]]
-    else:  # Do not reach
-        return []
+    else: return [] # Do not reach
 
 def correct_procedure(ini_set, seq):
     info_op = {jt : {job : {op : 0 for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
