@@ -332,8 +332,7 @@ def generate_case(process, setup, ini_set, machines):
             cr = 3
         elif offsprings[0][1][4] > pops[0][1][4]:
             cr = 4
-        else:
-            cr = 1
+        else: cr = 1
         print(f"\nGeneration_{gen}")
         for pop in pops:
             print(pop)
@@ -347,27 +346,37 @@ def generate_case(process, setup, ini_set, machines):
         print(params["w"] * case[1][0][0] + (1 - params["w"]) * case[1][0][1], case[1:], "    ////    ", case[0])
     return database
 
-def save(database):
-    conn = mysql.connector.connect(user='root', password='gh314wns!')
+def save(ini_set, data):
+    conn = mysql.connector.connect(user='root', password='gh314wns!', database='cbr')
     cursor = conn.cursor()
-    cursor.execute("DROP DATABASE IF EXISTS CASE_DATABASE;")
-    cursor.execute("CREATE DATABASE CASE_DATABASE;")
-    cursor.execute("USE CASE_DATABASE;")
+    p = f"{[len(ini_set[jt]["jobs"]) for jt in ini_set.keys()]}"
+    cursor.execute("""SELECT COUNT(*) FROM case_database;""")
+    add = [i[0] for i in cursor][0]
+    for h, data in enumerate(data):
+        h += add
 
-    cursor.execute("""
-    CREATE TABLE CASE(
-    h SMALLINT NOT NULL,
-    p SMALLINT NOT NULL,
-    s_o VARCHAR(65535) NOT NULL,
-    alt FLOAT NOT NULL,
-    awt FLOAT NOT NULL,
-    PRIMARY KEY (h));
-    """)
-
-    for h, data in enumerate(database):
+        alt = data[1][0][0]
+        awt = data[1][0][1]
         cursor.execute(f"""
-        INSERT CASE VALUES ({h}, )
+        INSERT INTO case_database VALUES ({h + 1}, \"{p}\", {alt}, {awt});
         """)
+
+
+        cursor.execute(f"""
+        CREATE TABLE S_O_{h + 1} (
+        info smallint PRIMARY KEY NOT NULL,
+        job_type varchar(20) NOT NULL,
+        job varchar(10) NOT NULL);
+        """)
+
+        for i in range(len(data[0])):
+            jt, job, _, _ = data[0][i]
+            cursor.execute(f"""
+            INSERT INTO S_O_{h + 1} VALUES ({i + 1}, \"{jt}\", \"{job}\");
+            """)
+
+    conn.commit()
+    conn.close()
 
 class Duration:
     def __init__(self): pass
@@ -391,7 +400,10 @@ def start(processes, setups, machines_tmp):
         for op_type2 in setups:
             (jt1, op1), (jt2, op2) = op_type1, op_type2
             setattr(setup, f"{jt1}{op1}{jt2}{op2}", setups[(jt1, op1)][(jt2, op2)])
-    return generate_case(process, setup, ini_set, machines)
+
+    data = generate_case(process, setup, ini_set, machines)
+    save(ini_set, data)
+    return data
 
 def main():
 
@@ -419,9 +431,8 @@ def main():
 
     print("\n-----------------------------------------------------------------------------------------------------")
 
-    database = start(processes, setups, machines)
-    # saving_mysql = save(database)
-    return database
+    data = start(processes, setups, machines)
+    return data
 
 if __name__ == '__main__':
     main()
