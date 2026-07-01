@@ -32,6 +32,7 @@ def objective(process, setup, ini_set, seq):
         for l in range(1, len(machines[m])):
             job1, op1, _ = machines[m][l-1]
             job2, op2, _ = machines[m][l]
+            md.add(se_process[job1][op1][1] <= se_process[job2][op2][0])
             if getattr(setup, f"{job1}{op1}{job2}{op2}"):
                 se_setup[m].append([md.new_int_var(0, horizon, f'{job1}{op1}_{job2}{op2}') for _ in range(2)])
                 idx = len(se_setup[m]) - 1
@@ -146,7 +147,7 @@ def main():
         for op2 in setups[op1]:
             if setups[op1][op2] != 0:
                 print(f"{op2}({setups[op1][op2]})", end=" / ")
-
+        print()
     print("\n-----------------------------------------------------------------------------------------------------")
 
     start(processes, setups, machines)
