@@ -11,12 +11,12 @@ import collections
 
 # Parameter Input
 num_job, max_num_op, num_machines, max_time = 5, 5, 7, 9
-params = {"num_of_gens": 20, "mating_pool": 20, "num_offs": 10, "s_max": 2, "Np1": 10, "Np2": 20}
+params = {"num_of_gens": 5, "s_max": 2, "Np1": 10, "Np2": 20}
 
 # --- [DQN 하이퍼파라미터] ---
 LR = 0.001
 GAMMA = 0.9
-BATCH_SIZE = 32
+BATCH_SIZE = 10
 MEMORY_SIZE = 10000
 
 # =====================================================================
@@ -274,7 +274,7 @@ def knowledge_driven(process, setup, ini_set, kdp_pops, q_net, memory, epsilon):
             memory.put((state_list, action, reward, next_state_list))
 
             new_pops.append(new_pop)
-        
+
     return new_pops
 
 def graph_makespan(ini_set, machines, best):
@@ -341,7 +341,7 @@ def cp_aea(process, setup, ini_set, machines):
         pops.extend(offsprings_kdp)
         # 5. 세대 통합 및 우수 개체 선별
         pops.sort(key=lambda case: case[1])
-        
+
         print(f"Best Makespan: {pops[0][1]}")
 
         # 6. DQN 신경망 학습 (경험 리플레이)
@@ -349,16 +349,15 @@ def cp_aea(process, setup, ini_set, machines):
             s_batch, a_batch, r_batch, s_prime_batch = memory.sample(BATCH_SIZE)
             q_out = q_net(s_batch)
             q_a = q_out.gather(1, a_batch)
+
             max_q_prime = q_net(s_prime_batch).max(1)[0].unsqueeze(1)
-            
             target = r_batch + GAMMA * max_q_prime
+
             loss = F.smooth_l1_loss(q_a, target)
-            
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            
-        # 입실론 점진적 감소 (탐험 비율 줄이고 지식 활용 늘림)
+
         epsilon = max(0.01, epsilon * 0.95)
 
     print("\n최종 최적화 완료!")
