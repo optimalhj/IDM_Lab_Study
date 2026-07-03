@@ -272,7 +272,7 @@ def cp_aea(process, setup, ini_set, machines):
         
         # 2. 집단 분리: EGP(우수 절반)와 KDP(나머지 절반)
         egp = pops[:params["Np1"]]
-        kdp = pops[params["Np1"]:] 
+        kdp = pops[:params["Np2"]]
         
         # 3. EGP: 진화적 메타휴리스틱으로 자식 생성
         offsprings_egp = evolution_guided(process, setup, ini_set, egp)
