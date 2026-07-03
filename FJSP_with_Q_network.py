@@ -8,7 +8,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import collections
-import random
 
 # Parameter Input
 num_job, max_num_op, num_machines, max_time = 5, 5, 7, 9
@@ -46,7 +45,8 @@ class ReplayBuffer():
     def put(self, transition):
         self.buffer.append(transition)
     def sample(self, n):
-        mini_batch = random.sample(self.buffer, n)
+        mini_batch = [self.buffer[i] for i in rd.choice(len(self.buffer), size=n, replace=False)]
+
         s_lst, a_lst, r_lst, s_prime_lst = [], [], [], []
         for transition in mini_batch:
             s, a, r, s_prime = transition
@@ -119,7 +119,56 @@ def decoding(process, setup, ini_set, vectors):
     md.minimize(obj)
     solver = cp_model.CpSolver()
     solver.Solve(md)
-    return vectors, solver.ObjectiveValue(), {job : {op : [solver.value(time) for time in se_process[job][op]] for op in se_process[job].keys()} for job in se_process.keys()}, {m:[(solver.value(st), solver.value(ed)) for st, ed in se_setup[m]] for m in se_setup.keys()}
+    return encoding(seq), solver.ObjectiveValue(), {job : {op : [solver.value(time) for time in se_process[job][op]] for op in se_process[job].keys()} for job in se_process.keys()}, {m:[(solver.value(st), solver.value(ed)) for st, ed in se_setup[m]] for m in se_setup.keys()}
+
+def swap(os_vector, ms_vector):
+    idx1, idx2 = rd.choice(range(len(os_vector)), size=2, replace=False)
+    os_vector[idx1], os_vector[idx2], ms_vector[idx1], ms_vector[idx2] = os_vector[idx2], os_vector[idx1], ms_vector[idx2], ms_vector[idx1]
+    return os_vector, ms_vector
+def reverse(os_vector, ms_vector):
+    idx1, idx2 = sorted(rd.choice(range(len(os_vector)), size=2, replace=False))
+    if idx1 != 0: os_vector[idx1:idx2 + 1], ms_vector[idx1:idx2 + 1] = os_vector[idx2:idx1 - 1:-1], ms_vector[idx2:idx1 - 1:-1]
+    else: os_vector[idx1:idx2 + 1], ms_vector[idx1:idx2 + 1] = os_vector[idx2::-1], ms_vector[idx2::-1]
+    return os_vector, ms_vector
+def reassign(ini_set, os_vector, ms_vector):
+    idx = rd.choice(range(len(os_vector)))
+    job, op, m_tmp = correct_procedure(ini_set, os_vector, ms_vector)[idx]
+    ms_vector[idx] = rd.choice([m for m in ini_set[job][op] if m != m_tmp]) if len(ini_set[job][op]) != 1 else m_tmp
+    return os_vector, ms_vector
+def crossover(points, os_vector, ms_vector, pair):
+    new_os_vector, new_ms_vector = [], []
+    points_pair, os_vector_pair, ms_vector_pair = [], pair[0].copy(), pair[1].copy()
+    # print("PR1")
+    # print("\tOS_vector: ", os_vector)
+    # print("\tMS_vector: ", ms_vector)
+    # print(f"\tPoints({len(points)}): ", points)
+    # print("PR2")
+    # print("\tOS_vector: ", os_vector_pair)
+    # print("\tMS_vector: ", ms_vector_pair)
+
+    tmp_set = {}
+    for job in os_vector:
+        if job not in tmp_set:
+            tmp_set[job] = 0
+    for point in points:
+        tmp_set[os_vector[point]] += 1
+    for l in range(len(os_vector_pair)):
+        if tmp_set[os_vector_pair[l]] > 0:
+            tmp_set[os_vector_pair[l]] -= 1
+        else: points_pair.append(l)
+    # print(f"\tPoints({len(points_pair)}): ", points_pair)
+    for i in range(len(os_vector)):
+        if i in points:
+            new_os_vector.append(os_vector[i])
+            new_ms_vector.append(ms_vector[i])
+        else:
+            idx = points_pair.pop(0)
+            new_os_vector.append(os_vector_pair[idx])
+            new_ms_vector.append(ms_vector_pair[idx])
+    # print("Offspring")
+    # print("\tOS_vector: ", new_os_vector)
+    # print("\tMS_vector: ", new_ms_vector)
+    return new_os_vector, new_ms_vector
 
 def evolution_guided(process, setup, ini_set, pops):
     # EGP (진화 유도) - 기존 로직 유지
@@ -129,20 +178,15 @@ def evolution_guided(process, setup, ini_set, pops):
         os_vector, ms_vector = seq[0].copy(), seq[1].copy()
         way = rd.randint(3)
         if way == 0:
-            idx1, idx2 = rd.choice(range(len(os_vector)), size=2, replace=False)
-            os_vector[idx1], os_vector[idx2], ms_vector[idx1], ms_vector[idx2] = os_vector[idx2], os_vector[idx1], ms_vector[idx2], ms_vector[idx1]
+            result = swap(os_vector, ms_vector)
         elif way == 1:
-            idx1, idx2 = sorted(rd.choice(range(len(os_vector)), size=2, replace=False))
-            if idx1 != 0: os_vector[idx1:idx2+1], ms_vector[idx1:idx2+1] = os_vector[idx2:idx1-1:-1], ms_vector[idx2:idx1-1:-1]
-            else: os_vector[idx1:idx2 + 1], ms_vector[idx1:idx2 + 1] = os_vector[idx2::-1], ms_vector[idx2::-1]
+            result = reverse(os_vector, ms_vector)
         elif way == 2:
-            idx = rd.choice(range(len(os_vector)))
-            job, op, m_tmp = correct_procedure(ini_set, os_vector, ms_vector)[idx]
-            ms_vector[idx] = rd.choice([m for m in ini_set[job][op] if m != m_tmp]) if len(ini_set[job][op]) != 1 else m_tmp
-        new_pops.append(decoding(process, setup, ini_set, (os_vector, ms_vector)))
+            result = reassign(ini_set, os_vector, ms_vector)
+        else: result = [] # Do not reach
+        new_pops.append(decoding(process, setup, ini_set, result))
 
     for _ in range(len(winner_pops)):
-        if not loser_pops: break
         pr1, pr2 = rd.permutation([winner_pops.pop(rd.randint(len(winner_pops)))[0], loser_pops.pop(rd.randint(len(loser_pops)))[0]]).tolist()
         os_vector = pr1[0]
         pr1, pr2 = correct_procedure(ini_set, pr1[0], pr1[1]), correct_procedure(ini_set, pr2[0], pr2[1])
@@ -165,57 +209,71 @@ def get_state_vector(os_vector, ms_vector):
     for m in ms_vector: state.append(int(m.replace("M", "")))
     return state
 
-def knowledge_driven(process, setup, ini_set, kdp_pops, all_pops, q_net, memory, epsilon):
+def knowledge_driven(process, setup, ini_set, kdp_pops, q_net, memory, epsilon):
     """ DQN이 kdp_pops(지식 기반 집단)의 상태를 보고 탐색 오퍼레이터를 선택하여 진화 """
     new_pops = []
-    
+
     for pop in kdp_pops:
         os_vector, ms_vector = pop[0][0].copy(), pop[0][1].copy()
         current_makespan = pop[1]
-        
         # 1. State(상태) 형성 (OS + MS 벡터 정수화)
         state_list = get_state_vector(os_vector, ms_vector)
         state_tensor = torch.tensor(state_list, dtype=torch.float)
-        
+
+        for pair in [pop_tmp[0] for pop_tmp in kdp_pops if pop_tmp[0] != pop[0]]:
         # 2. Action(행동) 선택 - 입실론 탐욕 전략
-        if rd.random() < epsilon:
-            action = rd.randint(6)  # 탐험
-        else:
-            action = q_net(state_tensor).argmax().item() # Q-Network 예측
-            
-        # 3. Action 수행 (6개의 탐색 오퍼레이터)
-        new_os, new_ms = os_vector.copy(), ms_vector.copy()
-        
-        if action == 0: # 로컬 1: Swap
-            idx1, idx2 = rd.choice(range(len(new_os)), size=2, replace=False)
-            new_os[idx1], new_os[idx2], new_ms[idx1], new_ms[idx2] = new_os[idx2], new_os[idx1], new_ms[idx2], new_ms[idx1]
-        elif action == 1: # 로컬 2: Reverse
-            idx1, idx2 = sorted(rd.choice(range(len(new_os)), size=2, replace=False))
-            new_os[idx1:idx2+1], new_ms[idx1:idx2+1] = new_os[idx1:idx2+1][::-1], new_ms[idx1:idx2+1][::-1]
-        elif action == 2: # 로컬 3: Reassign
-            idx = rd.choice(range(len(new_os)))
-            job, op, m_tmp = correct_procedure(ini_set, new_os, new_ms)[idx]
-            if len(ini_set[job][op]) > 1:
-                new_ms[idx] = rd.choice([m for m in ini_set[job][op] if m != m_tmp])
-        elif action >= 3: # 협력 1,2,3: Crossover (다른 개체와 유전자 섞기)
-            partner = all_pops[rd.randint(len(all_pops))][0]
-            split_point = len(new_os) // 2
-            new_os = new_os[:split_point] + partner[0][split_point:]
-            new_ms = new_ms[:split_point] + partner[1][split_point:]
-            # 잘못 섞인 유전자는 decoding 내의 correct_procedure가 자동 보정함
-            
-        # 4. 평가 (Decoding)
-        new_pop = decoding(process, setup, ini_set, (new_os, new_ms))
-        new_makespan = new_pop[1]
-        
-        # 5. 보상 (Makespan 단축 시 +10, 아니면 0)
-        reward = 10.0 if new_makespan < current_makespan else 0.0
-        
-        # 6. 다음 상태 (Next State) 및 버퍼 저장
-        next_state_list = get_state_vector(new_pop[0][0], new_pop[0][1])
-        memory.put((state_list, action, reward, next_state_list))
-        
-        new_pops.append(new_pop)
+            if rd.random() < epsilon: action = rd.randint(6)  # 탐험
+            else: action = q_net(state_tensor).argmax().item() # Q-Network 예측
+            if len(os_vector) <= 3 and action == 5: action = 4
+            if len(os_vector) <= 2 and action == 4: action = 3
+
+            # 3. Action 수행 (6개의 탐색 오퍼레이터)
+            # print("Action :", action, end=" --> ")
+            if action == 0: # 로컬 1: Swap
+                vectors = swap(os_vector, ms_vector)
+                # print("Swap")
+            elif action == 1: # 로컬 2: Reverse
+                vectors = reverse(os_vector, ms_vector)
+                # print("Reverse")
+            elif action == 2: # 로컬 3: Reassign
+                vectors = reassign(ini_set, os_vector, ms_vector)
+                # print("Reassign")
+            else:
+
+                if action == 3:
+                    idx = rd.randint(len(os_vector))
+                    chosen_job = os_vector[idx]
+                    # print("Job Based --> Chosen Job :", chosen_job)
+                    points = [i for i in range(len(os_vector)) if os_vector[i] == chosen_job]
+                elif action == 4:
+                    idx1, idx2 = sorted(rd.choice(list(range(1, max(2, len(os_vector) - 1))), size=2, replace=False))
+                    # print("Two points --> Two Indexes", idx1, idx2)
+                    points = [i for i in range(len(os_vector)) if i < idx1 or i >= idx2]
+                elif action == 5:
+                    indices = [0] + sorted(rd.choice(list(range(1, max(2, len(os_vector) - 1))), size=rd.randint(3, max(4, len(os_vector)//2)), replace=False)) + [len(os_vector) - 1]
+                    # print("Multi points --> Chosen Indexes", indices)
+                    points = []
+                    for l in range(len(indices) - 1):
+                        if l % 2 == 0:
+                            points.extend(list(range(indices[l], indices[l + 1])))
+                    if len(indices) % 2 == 1:
+                        points.extend(list(range(indices[len(indices) - 1], len(os_vector))))
+                else: points = [] # Do not reach
+                vectors = crossover(points, os_vector, ms_vector, pair)
+            # print()
+
+            # 4. 평가 (Decoding)
+            new_pop = decoding(process, setup, ini_set, vectors)
+            new_makespan = new_pop[1]
+
+            # 5. 보상 (Makespan 단축 시 +10, 아니면 0)
+            reward = 10.0 if new_makespan < current_makespan else 0.0
+
+            # 6. 다음 상태 (Next State) 및 버퍼 저장
+            next_state_list = get_state_vector(new_pop[0][0], new_pop[0][1])
+            memory.put((state_list, action, reward, next_state_list))
+
+            new_pops.append(new_pop)
         
     return new_pops
 
@@ -224,7 +282,7 @@ def graph_makespan(ini_set, machines, best):
     seq = correct_procedure(ini_set, seq[0], seq[1])
 
     _, ax = plt.subplots()
-    s_job, s_machine, m_tmp = list(se_process.keys()), {}, {}
+    s_job, s_machine, m_tmp = list(ini_set.keys()), {}, {}
     for m in machines:
         ax.barh(m, 0, left=0)
         s_machine[m] = 0
@@ -242,7 +300,7 @@ def graph_makespan(ini_set, machines, best):
             setup_ing = ed_setup - st_setup
             if round(setup_ing) != 0:
                 ax.barh(m, setup_ing, left=st_setup, color='white', edgecolor='black')
-    ax.set_xticks([i for i in range(int(max(se_process[job][op][1] for job in se_process.keys() for op in se_process[job].keys())) + 2)])
+    ax.set_xticks([i for i in range(int(obj) + 2)])
     ax.tick_params(axis='x', labelsize=5)
     ax.set_yticks(range(len(machines)))
     ax.set_yticklabels(machines)
@@ -259,7 +317,7 @@ def cp_aea(process, setup, ini_set, machines):
     print("Gen 0", "="*30)
     print("Initial Population 생성을 위해 CP 모델 해석 중...")
     pops = sorted([decoding(process, setup, ini_set, (rd.permutation(ini_os_vector).tolist(), [])) for _ in range(params["Np1"] + params["Np2"])], key=lambda case: case[1])
-    
+    print(f"Best Makespan: {pops[0][1]}")
     # 1. DQN 초기화
     state_dim = len(ini_os_vector) * 2 # OS 벡터 길이 + MS 벡터 길이
     q_net = FJSP_QNet(state_dim=state_dim, action_dim=6)
@@ -278,10 +336,11 @@ def cp_aea(process, setup, ini_set, machines):
         offsprings_egp = evolution_guided(process, setup, ini_set, egp)
         
         # 4. KDP: DQN 강화학습 판단으로 자식 생성 (새로 구현된 부분)
-        offsprings_kdp = knowledge_driven(process, setup, ini_set, kdp, pops, q_net, memory, epsilon)
-        
+        offsprings_kdp = knowledge_driven(process, setup, ini_set, kdp, q_net, memory, epsilon)
+        pops.extend(offsprings_egp)
+        pops.extend(offsprings_kdp)
         # 5. 세대 통합 및 우수 개체 선별
-        pops = sorted(pops + offsprings_egp + offsprings_kdp, key=lambda case: case[1])[:(params["Np1"] + params["Np2"])]
+        pops.sort(key=lambda case: case[1])
         
         print(f"Best Makespan: {pops[0][1]}")
 
