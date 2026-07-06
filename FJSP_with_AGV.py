@@ -84,7 +84,7 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
         if agv == agv_info[0]:
             for l in range(len(agvs[agv])):
                 job, op, m = agvs[agv][l]
-                se_agv[agv].append([md.new_int_var(0, horizon, f"{job}{op}") for _ in range(2)] + [f"{(job, m)}"])
+                se_agv[agv].append([md.new_int_var(0, horizon, f"{job}{op}") for _ in range(2)] + [f"({job}, {m})"])
                 interval_agv[agv].append(md.new_interval_var(se_agv[agv][l][0], 2, se_agv[agv][l][1], se_agv[agv][l][2]))
                 md.add(se_agv[agv][l][0] + se_agv[agv][l][1] == 2 * se_process[job][op][0])
         else:
@@ -163,8 +163,9 @@ def graph_makespan(ini_set, machines, agv_info, best):
 def fjsp_agv(process, setup, agv_move, ini_set, machines, agv_info):
     ini_os = [job for job in ini_set.keys() for _ in range(len(ini_set[job].keys()))]
     pops1, pops2 = [sorted([decoding(process, setup, agv_move, ini_set, agv_info, (rd.permutation(ini_os).tolist(), [], [])) for _ in range(params["pop_size"])], key=lambda case:case[1]) for _ in range(2)]
-    for pop in sorted(pops1, key=lambda case:case[1]):
-        print(pop[1], pop[0], pop[2:])
+    print(pops1[0][1], pops1[0][0], pops1[0][2:])
+    # for pop in sorted(pops1, key=lambda case:case[1]):
+    #     print(pop[1], pop[0], pop[2:])
     graph_makespan(ini_set, machines, agv_info, pops1[0])
     for gen in range(1, params["num_of_gens"] + 1):
         break
