@@ -71,12 +71,13 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
         md.add_no_overlap(interval_setup[m] + [interval[job][op] for job, op in machines[m]])
     md.add_cumulative([l for m in interval_setup.keys() for l in interval_setup[m]], [1 for m in interval_setup.keys() for _ in interval_setup[m]], params["s_max"])
 
-    bool_agv, se_agv, interval_agv,machine_bool_agv, size_machine_agv = {}, {}, {}, {}, {}
+    bool_agv, se_agv, interval_agv, machine_bool_agv, size_machine_agv, history_agv = {}, {}, {}, {}, {}, {}
 
     for agv in agv_info:
         bool_agv[agv] = {}
         se_agv[agv] = {}
         interval_agv[agv] = {}
+        history_agv[agv] = {}
         if agv != agv_info[0]:
             machine_bool_agv[agv] = {}
             size_machine_agv[agv] = {}
@@ -84,35 +85,39 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
             bool_agv[agv][job] = {}
             se_agv[agv][job] = {}
             interval_agv[agv][job] = {}
+            history_agv[agv][job] = {}
             for op in ini_set[job].keys():
                 bool_agv[agv][job][op] = md.new_bool_var(f"{agv}/{job}/{op}")
                 se_agv[agv][job][op] = [md.new_int_var(0, horizon, f"{job}{op}") for _ in range(2)] + [f"({job}, {op})"]
-
+                history_agv[agv][job][op] = [md.new_int_var(0, horizon, f"({job}, {op})"), md.new_bool_var(f"({job}, {op})")]
     for job in ini_set.keys():
         for op in ini_set[job].keys():
             md.add(sum(bool_agv[agv][job][op] for agv in agv_info) == 1)
 
     for l in range(len(seq)):
         job, op, m = seq[l]
-
         idx_job = list(ini_set[job]).index(op)
         idx_machine = machines[m].index((job, op))
         if idx_job == 0:
             md.add(bool_agv[agv_info[0]][job][op] == 0)
-            interval_agv[agv_info[0]][job][op] = md.new_interval_var(se_agv[agv_info[0]][job][op][0], bool_agv[agv_info[0]][job][op], se_agv[agv_info[0]][job][op][1], "Virtual")
-            if idx_machine == 0:
-                for agv in agv_info[1:]:
-                    interval_agv[agv][job][op] = md.new_interval_var(se_agv[agv][job][op][0], bool_agv[agv][job][op] * getattr(agv_move, f"LU{m}"), se_agv[agv][job][op][1], f"LU->{m}/({job}, {op})")
-            else:
-                for agv in agv_info[1:]:
-                    machine_bool_agv[agv][(job, op)] = {}
-                    size_machine_agv[agv][(job, op)] = md.new_int_var(0, horizon, f"({job}, {op})")
-                    for m_tmp in machines.keys():
-                        machine_bool_agv[agv][(job, op)][m_tmp] = md.new_bool_var(f"({job}, {op}, {m_tmp})")
-                    md.add(size_machine_agv[agv][(job, op)] == sum(machine_bool_agv[agv][(job, op)][m_tmp] * getattr(agv_move, f"LU{m_tmp}") for m_tmp in machines.keys()) + bool_agv[agv][job][op] * getattr(agv_move, f"LU{m}"))
-                md.add(sum(machine_bool_agv[agv][(job, op)][m_tmp] for agv in agv_info[1:] for m_tmp in machines.keys()) == 1)
-                for agv in machine_bool_agv.keys():
-                    interval_agv[agv][job][op] = md.new_interval_var(se_agv[agv][job][op][0], size_machine_agv[agv][(job, op)], se_agv[agv][job][op][1], f"Comeback->{m}/({job}, {op})")
+            interval_agv[agv_info[0]][job][op] = md.new_interval_var(se_agv[agv_info[0]][job][op][0], bool_agv[agv_info[0]][job][op], se_agv[agv_info[0]][job][op][1], "pass")
+
+            for agv in agv_info[1:]:
+                machine_bool_agv[agv][(job, op)] = {m_tmp : md.new_bool_var(f"({agv}, {job}, {op}, {m_tmp})") for m_tmp in machines.keys()}
+                md.add(history_agv[agv][job][op][0] == sum(bool_agv[agv][seq[l0][0]][seq[l0][1]] for l0 in range(l)))
+
+                md.add(history_agv[agv][job][op][0] == 0).OnlyEnforceIf(history_agv[agv][job][op][1].Not())
+                md.add(history_agv[agv][job][op][0] >= 1).OnlyEnforceIf(history_agv[agv][job][op][1])
+
+                size_machine_agv[agv][(job, op)] = md.new_int_var(0, horizon, f"{m}/({job}, {op})")
+                md.add(size_machine_agv[agv][(job, op)] == bool_agv[agv][job][op] * getattr(agv_move, f"LU{m}")).OnlyEnforceIf(history_agv[agv][job][op][1].Not())
+                md.add(size_machine_agv[agv][(job, op)] == sum(machine_bool_agv[agv][(job, op)][m_tmp] * getattr(agv_move, f"LU{m_tmp}") for m_tmp in machines.keys()) + bool_agv[agv][job][op] * getattr(agv_move, f"LU{m}")).OnlyEnforceIf(history_agv[agv][job][op][1])
+
+            md.add(sum(sum(machine_bool_agv[agv][(job, op)].values()) for agv in agv_info[1:]) == 1)
+            for agv in machine_bool_agv.keys():
+                interval_agv[agv][job][op] = md.new_interval_var(se_agv[agv][job][op][0], size_machine_agv[agv][(job, op)], se_agv[agv][job][op][1], f"pass")
+
+
         else:
             if idx_machine == 0:
                 md.add(bool_agv[agv_info[0]][job][op] == 0)
@@ -161,9 +166,9 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
     md.minimize(obj)
     solver = cp_model.CpSolver()
     solver.Solve(md)
-    se_agv = {agv : {job : {op : (solver.value(se_agv[agv][job][op][0]), solver.value(se_agv[agv][job][op][1]), str(interval_agv[agv][job][op])) for op in se_agv[agv][job].keys()} for job in se_agv[agv].keys()} for agv in se_agv.keys()}
+    se_agv = {agv : {job : {op : (solver.value(se_agv[agv][job][op][0]), solver.value(se_agv[agv][job][op][1]), str(interval_agv[agv][job][op])) for op in se_agv[agv][job].keys() if round(solver.value(se_agv[agv][job][op][1]) - solver.value(se_agv[agv][job][op][0])) != 0} for job in se_agv[agv].keys()} for agv in se_agv.keys()}
 
-    return encoding(seq), solver.ObjectiveValue(), {job: {op: [solver.value(time) for time in se_process[job][op]] for op in se_process[job].keys()} for job in se_process.keys()}, {m: [(solver.value(st), solver.value(ed)) for st, ed in se_setup[m]] for m in se_setup.keys()}, se_agv
+    return encoding(seq), solver.ObjectiveValue(), {job: {op: [solver.value(time) for time in se_process[job][op]] for op in se_process[job].keys()} for job in se_process.keys()}, {m: [(solver.value(st), solver.value(ed)) for st, ed in se_setup[m] if round(solver.value(ed) - solver.value(st)) != 0] for m in se_setup.keys()}, se_agv
 
 def swap(os_vector, ms_vector):
     idx1, idx2 = rd.choice(range(len(os_vector)), size=2, replace=False)
@@ -230,16 +235,30 @@ def graph_makespan(ini_set, machines, agv_info, best):
     for m in se_setup.keys():
         for st_setup, ed_setup in se_setup[m]:
             setup_ing = ed_setup - st_setup
-            if round(setup_ing) != 0:
-                ax.barh(m, setup_ing, left=st_setup, color='white', edgecolor='black')
+            ax.barh(m, setup_ing, left=st_setup, color='white', edgecolor='black')
 
     for agv in se_agv.keys():
         for job in se_agv[agv].keys():
             for op in se_agv[agv][job].keys():
+                print(agv, job, op)
                 st, ed, attr = se_agv[agv][job][op]
+                print(st, ed, attr)
                 moving = ed - st
-                if round(moving) != 0:
-                    ax.barh(agv, moving, left=st, color='orange', edgecolor='black')
+                ax.barh(agv, moving, left=st, color='orange', edgecolor='black')
+                if attr == "pass":
+                    m = "m_bug"
+                    for job_tmp, op_tmp, m_tmp in seq:
+                        if job_tmp == job and op_tmp == op:
+                            m = m_tmp
+                            break
+                    if st == se_agv[agv][job][min(se_agv[agv][job], key=lambda op_tmp:se_agv[agv][job][op_tmp][0])][0]:
+                        print(True)
+                        # ax.text(st + moving / 2, agv, f"LU -> {m}\n({job}, {op})", va='center', ha='center', fontsize=5)
+                    else:
+                        print(False)
+                        ax.text(st + moving / 2, agv, f"Hello\n({job}, {op})", va='center', ha='center', fontsize=5)
+
+                else:
                     ax.text(st + moving / 2, agv, "\n".join(attr.split("/")), va='center', ha='center', fontsize=5)
     ax.set_xticks([i for i in range(int(obj) + 2)])
     ax.tick_params(axis='x', labelsize=5)
