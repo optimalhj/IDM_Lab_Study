@@ -37,7 +37,7 @@ def encoding(seq):
         vs_vector.append(agv)
     return os_vector, ms_vector, vs_vector
 
-def decoding(process, setup, agv_loaded, agv_unloaded, ini_set, agv_info, vectors):
+def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
     se_process, interval = {}, {}
     seq = correct_procedure(ini_set, agv_info, vectors[0], vectors[1], vectors[2])
     horizon = num_job * max_num_op * max_time
@@ -91,21 +91,28 @@ def decoding(process, setup, agv_loaded, agv_unloaded, ini_set, agv_info, vector
             for l in range(len(agvs[agv])):
                 job, op, m = agvs[agv][l]
                 if l == 0:
-                    se_agv[agv].append([md.new_int_var(0, horizon, f"{job}{op}") for _ in range(2)] + [f"First/{(job, op, m)}"])
-                    interval_agv[agv].append(md.new_interval_var(se_agv[agv][l][0], 1, se_agv[agv][l][1],se_agv[agv][l][2]))
+                    se_agv[agv].append([md.new_int_var(0, horizon, f"{job}{op}") for _ in range(2)] + [f"First/({job}, {op}, {m})"])
+                    interval_agv[agv].append(md.new_interval_var(se_agv[agv][l][0], getattr(agv_move, f"LU{m}"), se_agv[agv][l][1],se_agv[agv][l][2]))
                 else:
-                    prior_job, prior_op, prior_m = agvs[agv][l-1]
+                    prior_job, prior_op, prior_m = agvs[agv][l - 1]
+                    if op != list(ini_set[job])[0]:
 
-                    if prior_job == job: # Loading Situation
-                        se_agv[agv].append([md.new_int_var(0, horizon, f"{job}{op}") for _ in range(2)] + [f"Loaded/{(prior_job, prior_op, prior_m)}/{(job, op, m)}"])
-                        interval_agv[agv].append(md.new_interval_var(se_agv[agv][l][0], getattr(agv_loaded, f"{prior_m}{m}"), se_agv[agv][l][1], se_agv[agv][l][2]))
-                        md.add(se_process[prior_job][prior_op][1] == se_agv[agv][l][0])
 
-                    else: # Unloading Situation
-                        se_agv[agv].append([md.new_int_var(0, horizon, f"{job}{op}") for _ in range(2)] + [f"UnLoaded/{(prior_job, prior_op, prior_m)}/{(job, op, m)}"])
-                        interval_agv[agv].append(md.new_interval_var(se_agv[agv][l][0], getattr(agv_unloaded, f"{prior_m}{m}"), se_agv[agv][l][1], se_agv[agv][l][2]))
-                        md.add(se_process[prior_job][prior_op][0] == se_agv[agv][l][0])
-                    md.add(se_agv[agv][l-1][1] <= se_agv[agv][l][0])
+                        if prior_job == job: # Loading Situation
+                            se_agv[agv].append([md.new_int_var(0, horizon, f"{job}{op}") for _ in range(2)] + [f"Loaded/({prior_job}, {prior_op}, {prior_m})/({job}, {op}, {m})"])
+                            interval_agv[agv].append(md.new_interval_var(se_agv[agv][l][0], getattr(agv_move, f"{prior_m}{m}load"), se_agv[agv][l][1], se_agv[agv][l][2]))
+                            md.add(se_process[prior_job][prior_op][1] <= se_agv[agv][l][0])
+
+                        else: # Unloading Situation
+                            se_agv[agv].append([md.new_int_var(0, horizon, f"{job}{op}") for _ in range(2)] + [f"UnLoaded/({prior_job}, {prior_op}, {prior_m})/({job}, {op}, {m})"])
+                            interval_agv[agv].append(md.new_interval_var(se_agv[agv][l][0], getattr(agv_move, f"{prior_m}{m}unload"), se_agv[agv][l][1], se_agv[agv][l][2]))
+                            md.add(se_process[prior_job][prior_op][0] <= se_agv[agv][l][0])
+
+                    else:
+                        se_agv[agv].append([md.new_int_var(0, horizon, f"{job}{op}") for _ in range(2)] + [f"Comeback/({prior_job}, {prior_op}, {prior_m})/({job}, {op}, {m})"])
+                        interval_agv[agv].append(md.new_interval_var(se_agv[agv][l][0], getattr(agv_move, f"LU{prior_m}") + getattr(agv_move, f"LU{m}"), se_agv[agv][l][1], se_agv[agv][l][2]))
+                        md.add(se_process[prior_job][prior_op][0] <= se_agv[agv][l][0])
+                    md.add(se_agv[agv][l - 1][1] <= se_agv[agv][l][0])
                 md.add(se_agv[agv][l][1] <= se_process[job][op][0])
 
             md.add_no_overlap(interval_agv[agv])
@@ -153,9 +160,9 @@ def graph_makespan(ini_set, machines, agv_info, best):
     ax.set_title("Makespan_Result (EA-DQN)")
     plt.show()
 
-def fjsp_agv(process, setup, agv_loaded, agv_unloaded, ini_set, machines, agv_info):
+def fjsp_agv(process, setup, agv_move, ini_set, machines, agv_info):
     ini_os = [job for job in ini_set.keys() for _ in range(len(ini_set[job].keys()))]
-    pops1, pops2 = [sorted([decoding(process, setup, agv_loaded, agv_unloaded, ini_set, agv_info, (rd.permutation(ini_os).tolist(), [], [])) for _ in range(params["pop_size"])], key=lambda case:case[1]) for _ in range(2)]
+    pops1, pops2 = [sorted([decoding(process, setup, agv_move, ini_set, agv_info, (rd.permutation(ini_os).tolist(), [], [])) for _ in range(params["pop_size"])], key=lambda case:case[1]) for _ in range(2)]
     for pop in sorted(pops1, key=lambda case:case[1]):
         print(pop[1], pop[0], pop[2:])
     graph_makespan(ini_set, machines, agv_info, pops1[0])
@@ -168,12 +175,12 @@ class Process:
     def __init__(self): pass
 class SetUp:
     def __init__(self): pass
-class AGVLoaded:
+class AGVMove:
     def __init__(self): pass
 class AGVUnLoaded:
     def __init__(self): pass
 def start(processes, setups, machines_tmp, agv_tmp):
-    process, setup, ini_set, agv_loaded, agv_unloaded, machines = Process(), SetUp(), {}, AGVLoaded(), AGVUnLoaded(),[]
+    process, setup, ini_set, agv_move, machines = Process(), SetUp(), {}, AGVMove(),[]
     for job in processes.keys():
         print(job)
         ini_set[job] = {}
@@ -191,14 +198,19 @@ def start(processes, setups, machines_tmp, agv_tmp):
             setattr(setup, f"{job1}{op1}{job2}{op2}", setups[(job1, op1)][(job2, op2)])
 
     for m1, m2, load_time, unload_time in agv_tmp[-1]:
-        setattr(agv_loaded, f"{m1}{m2}", load_time)
-        setattr(agv_unloaded, f"{m1}{m2}", unload_time)
-    fjsp_agv(process, setup, agv_loaded, agv_unloaded, ini_set, machines, agv_tmp[:len(agv_tmp) - 2])
+        if m1 != "LU":
+            setattr(agv_move, f"{m1}{m2}load", load_time)
+            setattr(agv_move, f"{m1}{m2}unload", unload_time)
+        else:
+            setattr(agv_move, f"LU{m2}", load_time)
+
+    fjsp_agv(process, setup, agv_move, ini_set, machines, agv_tmp[:len(agv_tmp) - 2])
 
 def main():
 
     machines = [f"M{i}" for i in range(1, num_machines + 1)]
-    agv = [f"AGV{i}" for i in range(0, num_AGV + 1)] + [[(m1, m2, rd.randint(1, max(2, (max_time // 3) + 1)), rd.randint(1, max(2, (max_time // 3) + 1))) if m1 != m2 else (m1, m2, 0, 0)for m1 in machines for m2 in machines]]
+    agv = [f"AGV{i}" for i in range(0, num_AGV + 1)] + [[(m1, m2, rd.randint(1, max(2, (max_time // 3) + 1)), rd.randint(1, max(2, (max_time // 3) + 1))) if m1 != m2 else (m1, m2, 0, 0) if m1 != "LU" else (m1, m2, rd.randint(1, 3), 0) for m1 in machines + ["LU"] for m2 in machines]]
+
     processes = {f"Job{j + 1}": {f"Op{o + 1}": [sorted(rd.choice(machines, size=rd.randint(2, len(machines)), replace=False).tolist(), key=lambda m: machines.index(m)), rd.randint(1, max_time + 1)] for o in range(rd.randint(1, max_num_op + 1))} for j in range(1, num_job + 1)}
 
     op_types = [(job, op) for job in processes.keys() for op in processes[job].keys()]
