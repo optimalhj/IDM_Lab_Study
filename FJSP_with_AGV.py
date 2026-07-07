@@ -4,7 +4,7 @@ from ortools.sat.python import cp_model
 import matplotlib.pyplot as plt
 
 num_job, max_num_op, num_machines, num_AGV, max_time = 3, 3, 3, 3, 5
-params = {"pop_size": 10, "mating_pool": 20, "num_of_gens": 5, "s_max": 2}
+params = {"pop_size": 1, "mating_pool": 10, "num_of_gens": 5, "s_max": 2}
 
 
 def select_mp(populations):
@@ -103,7 +103,7 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
             interval_agv[agv_info[0]][job][op] = md.new_interval_var(se_agv[agv_info[0]][job][op][0], bool_agv[agv_info[0]][job][op], se_agv[agv_info[0]][job][op][1], "pass")
 
             for agv in agv_info[1:]:
-                machine_bool_agv[agv][(job, op)] = {m_tmp : md.new_bool_var(f"({agv}, {job}, {op}, {m_tmp})") for m_tmp in machines.keys()}
+                machine_bool_agv[agv][job] = {m_tmp : md.new_bool_var(f"({agv}, {job}, {op}, {m_tmp})") for m_tmp in machines.keys()}
                 md.add(history_agv[agv][job][op][0] == sum(bool_agv[agv][seq[l0][0]][seq[l0][1]] for l0 in range(l)))
 
                 md.add(history_agv[agv][job][op][0] == 0).OnlyEnforceIf(history_agv[agv][job][op][1].Not())
@@ -111,15 +111,20 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
 
                 size_machine_agv[agv][(job, op)] = md.new_int_var(0, horizon, f"{m}/({job}, {op})")
                 md.add(size_machine_agv[agv][(job, op)] == bool_agv[agv][job][op] * getattr(agv_move, f"LU{m}")).OnlyEnforceIf(history_agv[agv][job][op][1].Not())
-                md.add(size_machine_agv[agv][(job, op)] == sum(machine_bool_agv[agv][(job, op)][m_tmp] * getattr(agv_move, f"LU{m_tmp}") for m_tmp in machines.keys()) + bool_agv[agv][job][op] * getattr(agv_move, f"LU{m}")).OnlyEnforceIf(history_agv[agv][job][op][1])
+                md.add(size_machine_agv[agv][(job, op)] == sum(machine_bool_agv[agv][job][m_tmp] * getattr(agv_move, f"LU{m_tmp}") for m_tmp in machines.keys()) + bool_agv[agv][job][op] * getattr(agv_move, f"LU{m}")).OnlyEnforceIf(history_agv[agv][job][op][1])
 
-            md.add(sum(sum(machine_bool_agv[agv][(job, op)].values()) for agv in agv_info[1:]) == 1)
+            md.add(sum(sum(machine_bool_agv[agv][job].values()) for agv in agv_info[1:]) == 1)
             for agv in machine_bool_agv.keys():
-                interval_agv[agv][job][op] = md.new_interval_var(se_agv[agv][job][op][0], size_machine_agv[agv][(job, op)], se_agv[agv][job][op][1], f"pass")
-
+                interval_agv[agv][job][op] = md.new_interval_var(se_agv[agv][job][op][0], size_machine_agv[agv][(job, op)], se_agv[agv][job][op][1], "pass")
 
         else:
-            if idx_machine == 0:
+            if idx_machine != 0 and machines[m][idx_machine - 1][0] == job and machines[m][idx_machine - 1][1] == list(ini_set[job])[idx_job - 1]:
+                md.add(bool_agv[agv_info[0]][job][op] == 1)
+                for agv in agv_info:
+                    interval_agv[agv][job][op] = md.new_interval_var(se_agv[agv][job][op][0], bool_agv[agv][job][op] * 2, se_agv[agv][job][op][1], f"Special->{m}/{job}")
+                    md.add(se_agv[agv][job][op][0] + se_agv[agv][job][op][1] == 2 * se_process[job][op][0])
+
+            else:
                 md.add(bool_agv[agv_info[0]][job][op] == 0)
                 prior_job_op, prior_job_m = list(ini_set[job])[idx_job - 1], "m"
                 for job_tmp, op_tmp, m_tmp in seq[l-1::-1]:
@@ -129,34 +134,7 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
                 for agv in agv_info:
                     interval_agv[agv][job][op] = md.new_interval_var(se_agv[agv][job][op][0], bool_agv[agv][job][op] * getattr(agv_move, f"{prior_job_m}{m}load"), se_agv[agv][job][op][1],f"{prior_job_m}->{m}/{job}/{prior_job_op}->{op}")
                     md.add(se_process[job][prior_job_op][1] <= se_agv[agv][job][op][0])
-            else:
-                prior_m_job, prior_m_op = machines[m][idx_machine - 1]
-                if prior_m_job == job:
-                    if prior_m_op == list(ini_set[job])[idx_job - 1]:
-                        md.add(bool_agv[agv_info[0]][job][op] == 1)
-                        for agv in agv_info:
-                            interval_agv[agv][job][op] = md.new_interval_var(se_agv[agv][job][op][0], bool_agv[agv][job][op] * 2, se_agv[agv][job][op][1],f"Special->{m}/{job}")
-                            md.add(se_agv[agv][job][op][0] + se_agv[agv][job][op][1] == 2 * se_process[job][op][0])
-                    else:
-                        md.add(bool_agv[agv_info[0]][job][op] == 0)
-                        prior_job_op, prior_job_m = list(ini_set[job])[idx_job - 1], "m"
-                        for job_tmp, op_tmp, m_tmp in seq[l - 1::-1]:
-                            if job_tmp == job and op_tmp == prior_job_op:
-                                prior_job_m = m_tmp
-                                break
-                        for agv in agv_info:
-                            interval_agv[agv][job][op] = md.new_interval_var(se_agv[agv][job][op][0], bool_agv[agv][job][op] * getattr(agv_move, f"{prior_job_m}{m}load"), se_agv[agv][job][op][1],f"{prior_job_m}->{m}/{job}/{prior_job_op}->{op}")
-                            md.add(se_process[job][prior_job_op][1] <= se_agv[agv][job][op][0])
-                else:
-                    md.add(bool_agv[agv_info[0]][job][op] == 0)
-                    prior_job_op, prior_job_m = list(ini_set[job])[idx_job - 1], "m"
-                    for job_tmp, op_tmp, m_tmp in seq[l - 1::-1]:
-                        if job_tmp == job and op_tmp == prior_job_op:
-                            prior_job_m = m_tmp
-                            break
-                    for agv in agv_info:
-                        interval_agv[agv][job][op] = md.new_interval_var(se_agv[agv][job][op][0], bool_agv[agv][job][op] * getattr(agv_move, f"{prior_job_m}{m}load"), se_agv[agv][job][op][1],f"{prior_job_m}->{m}/{job}/{prior_job_op}->{op}")
-                        md.add(se_process[job][prior_job_op][1] <= se_agv[agv][job][op][0])
+
         for agv in agv_info[1:]:
             md.add(se_agv[agv][job][op][1] == se_process[job][op][0])
     for agv in agv_info[1:]:
@@ -168,6 +146,17 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
     solver.Solve(md)
     se_agv = {agv : {job : {op : (solver.value(se_agv[agv][job][op][0]), solver.value(se_agv[agv][job][op][1]), str(interval_agv[agv][job][op])) for op in se_agv[agv][job].keys() if round(solver.value(se_agv[agv][job][op][1]) - solver.value(se_agv[agv][job][op][0])) != 0} for job in se_agv[agv].keys()} for agv in se_agv.keys()}
 
+    for job in ini_set.keys():
+        print(job)
+        print("\t", list(ini_set[job])[0])
+        for agv in agv_info[1:]:
+
+            print("\t\t", agv, end=" : ")
+            for m in machines:
+                print(f"{m}", end=" : ")
+                if job in machine_bool_agv[agv]: print(f"{solver.value(machine_bool_agv[agv][job][m]):1d}", end="   ")
+                else: print(0, end="   ")
+        print()
     return encoding(seq), solver.ObjectiveValue(), {job: {op: [solver.value(time) for time in se_process[job][op]] for op in se_process[job].keys()} for job in se_process.keys()}, {m: [(solver.value(st), solver.value(ed)) for st, ed in se_setup[m] if round(solver.value(ed) - solver.value(st)) != 0] for m in se_setup.keys()}, se_agv
 
 def swap(os_vector, ms_vector):
@@ -186,9 +175,9 @@ def reverse(os_vector, ms_vector):
     return os_vector, ms_vector
 
 
-def reassign(ini_set, os_vector, ms_vector):
+def reassign(ini_set, agv_info, os_vector, ms_vector):
     idx = rd.choice(range(len(os_vector)))
-    job, op, m_tmp = correct_procedure(ini_set, os_vector, ms_vector)[idx]
+    job, op, m_tmp = correct_procedure(ini_set, agv_info, os_vector, ms_vector)[idx]
     ms_vector[idx] = rd.choice([m for m in ini_set[job][op] if m != m_tmp]) if len(ini_set[job][op]) != 1 else m_tmp
     return os_vector, ms_vector
 
@@ -238,49 +227,54 @@ def graph_makespan(ini_set, machines, agv_info, best):
             ax.barh(m, setup_ing, left=st_setup, color='white', edgecolor='black')
 
     for agv in se_agv.keys():
-        for job in se_agv[agv].keys():
-            for op in se_agv[agv][job].keys():
-                print(agv, job, op)
+        st_list = sorted([(job, op) for job in se_agv[agv].keys() for op in se_agv[agv][job]], key=lambda op_type : se_agv[agv][op_type[0]][op_type[1]][0])
+        if len(st_list) > 0:
+            for l in range(len(st_list)):
+                job, op = st_list[l]
                 st, ed, attr = se_agv[agv][job][op]
-                print(st, ed, attr)
                 moving = ed - st
                 ax.barh(agv, moving, left=st, color='orange', edgecolor='black')
-                if attr == "pass":
-                    m = "m_bug"
-                    for job_tmp, op_tmp, m_tmp in seq:
-                        if job_tmp == job and op_tmp == op:
-                            m = m_tmp
-                            break
-                    if st == se_agv[agv][job][min(se_agv[agv][job], key=lambda op_tmp:se_agv[agv][job][op_tmp][0])][0]:
-                        print(True)
-                        # ax.text(st + moving / 2, agv, f"LU -> {m}\n({job}, {op})", va='center', ha='center', fontsize=5)
-                    else:
-                        print(False)
-                        ax.text(st + moving / 2, agv, f"Hello\n({job}, {op})", va='center', ha='center', fontsize=5)
 
-                else:
-                    ax.text(st + moving / 2, agv, "\n".join(attr.split("/")), va='center', ha='center', fontsize=5)
+                m = "m_bug"
+                for job_tmp, op_tmp, m_tmp in seq:
+                    if job_tmp == job and op_tmp == op:
+                        m = m_tmp
+                        break
+
+                if attr == "pass":
+
+                    if l == 0: txt = f"LU -> {m}\n({job}, {op})"
+                    else:
+                        prior_job, prior_op = st_list[l-1]
+                        prior_m = "m_bug"
+                        for job_tmp, op_tmp, m_tmp in seq:
+                            if job_tmp == prior_job and op_tmp == prior_op:
+                                prior_m = m_tmp
+                                break
+                        txt = f"{prior_m} ->\nLU -> {m}\n({job}, {op})"
+                else: txt = "\n".join(attr.split("/"))
+                ax.text(st + moving / 2, agv, txt, va='center', ha='center', fontsize=5)
     ax.set_xticks([i for i in range(int(obj) + 2)])
     ax.tick_params(axis='x', labelsize=5)
     ax.set_yticks(range(len(machines) + len(agv_info)))
     ax.set_yticklabels(machines + agv_info)
     ax.set_xlabel("Time")
-    ax.set_title("Makespan_Result (EA-DQN)")
+    ax.set_title("Makespan_Result")
     plt.show()
 
 def fjsp_agv(process, setup, agv_move, ini_set, machines, agv_info):
     ini_os = [job for job in ini_set.keys() for _ in range(len(ini_set[job].keys()))]
-    pops1, pops2 = [sorted([decoding(process, setup, agv_move, ini_set, agv_info, (rd.permutation(ini_os).tolist(), [])) for _ in range(params["pop_size"])], key=lambda case: case[1]) for _ in range(2)]
+    pops1 = [sorted([decoding(process, setup, agv_move, ini_set, agv_info, (rd.permutation(ini_os).tolist(), [])) for _ in range(params["pop_size"])], key=lambda case: case[1])][0]
     print(pops1[0][1], pops1[0][0], pops1[0][2:])
     graph_makespan(ini_set, machines, agv_info, pops1[0])
-    for gen in range(1, params["num_of_gens"] + 1):
-        offsprings = []
-        for pops in (pops1, pops2):
-            mating_pool = [select_mp(pops) for _ in range(params["mating_pool"])]
-            indices = list(range(params["mating_pool"]))
-            for _ in range(len(mating_pool) // 2):
-                mom, dad = [indices.pop(rd.randint(len(indices))) for _ in range(2)]
-                # offsprings.append(generate(process, setup, ini_set, machines, mating_pool[mom], mating_pool[dad]))
+    # for gen in range(1, params["num_of_gens"] + 1):
+    #     offsprings = []
+    #     for pops in (pops1, pops2):
+    #         mating_pool = [select_mp(pops) for _ in range(params["mating_pool"])]
+    #         indices = list(range(params["mating_pool"]))
+    #         for _ in range(len(mating_pool) // 2):
+    #             mom, dad = [indices.pop(rd.randint(len(indices))) for _ in range(2)]
+    #             # offsprings.append(generate(process, setup, ini_set, machines, mating_pool[mom], mating_pool[dad]))
 
     return 0
 
