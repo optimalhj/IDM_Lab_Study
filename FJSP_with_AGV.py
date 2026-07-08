@@ -3,23 +3,21 @@ from numpy import random as rd
 from ortools.sat.python import cp_model
 import matplotlib.pyplot as plt
 
-num_job, max_num_op, num_machines, num_AGV, max_time = 3, 3, 3, 3, 5
-params = {"pop_size": 1, "mating_pool": 10, "num_of_gens": 5, "s_max": 2}
-
+num_job, max_num_op, num_machines, num_AGV, max_time = 5, 5, 5, 3, 10
+params = {"pop_size": 10, "mating_pool": 10, "num_of_gens": 20, "s_max": 2}
 
 def select_mp(populations):
     index = list(range(params["pop_size"]))
-    way_pop = rd.randint(3)
-
-    if way_pop == 0:  # Binary tournament
+    way = rd.randint(3)
+    if way == 0:  # Binary tournament
         return populations[min(rd.choice(index, size=2, replace=False), key=lambda idx: populations[idx][1])][0]
-    elif way_pop == 1:  # n-Size tournament
+    elif way == 1:  # n-Size tournament
         return populations[min(rd.choice(index, size=rd.randint(3, max(4, int(params["pop_size"] / 2.5))), replace=False), key=lambda idx: populations[idx][1])][0]
-    elif way_pop == 2:  # Linear ranking
+    elif way == 2:  # Linear ranking
         return populations[rd.choice(index, size=1, p=[2 * i / (params["pop_size"] * (params["pop_size"] + 1)) for i in range(params["pop_size"], 0, -1)])[0]][0]
     else: return [] # Do not reach
 
-def correct_procedure(ini_set, agv_info, os_vector, ms_vector):
+def correct_procedure(ini_set, os_vector, ms_vector):
     seq, info_op = os_vector.copy(), {job: {op: 0 for op in ini_set[job]} for job in ini_set.keys()}
     for l in range(len(seq)):
         job = seq[l]
@@ -38,7 +36,7 @@ def encoding(seq):
 
 def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
     se_process, interval = {}, {}
-    seq = correct_procedure(ini_set, agv_info, vectors[0], vectors[1])
+    seq = correct_procedure(ini_set, vectors[0], vectors[1])
     horizon = num_job * max_num_op * max_time
     md = cp_model.CpModel()
     for job in ini_set.keys():
@@ -109,6 +107,7 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
         idx_job, idx_machine = list(ini_set[job]).index(op), machines[m].index((job, op))
         if idx_job != 0 and idx_machine != 0 and (job, list(ini_set[job])[idx_job - 1]) == machines[m][idx_machine - 1]:
             md.add(bool_agv[agv_info[0]][job][op] == 1)
+            md.add(se_process[job][list(ini_set[job])[idx_job-1]][1] == se_process[job][op][0]).OnlyEnforceIf(bool_agv[agv_info[0]][job][op])
             for agv in agv_info:
                 md.add(unloading_time_agv[agv][job][op] == 0)
                 md.add(loading_time_agv[agv][job][op] == 2 * bool_agv[agv][job][op])
@@ -175,22 +174,91 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
     solver = cp_model.CpSolver()
     solver.Solve(md)
 
-
-    for job in ini_set.keys():
-        print(job)
-        for op in ini_set[job].keys():
-            print("\t", op)
-            for agv in agv_info:
-                print("\t\t", agv, ":", solver.value(bool_agv[agv][job][op]))
     se_process = {job: {op: [solver.value(time) for time in se_process[job][op]] for op in se_process[job].keys()} for job in se_process.keys()}
     se_setup = {m: [(solver.value(st), solver.value(ed)) for st, ed in se_setup[m] if round(solver.value(ed) - solver.value(st)) != 0] for m in se_setup.keys()}
     se_load_agv = {agv: {job: {op: (solver.value(se_load_agv[agv][job][op][0]), solver.value(se_load_agv[agv][job][op][1]), f"{interval_load_agv[agv][job][op]}") for op in se_load_agv[agv][job].keys() if round(solver.value(se_load_agv[agv][job][op][1]) - solver.value(se_load_agv[agv][job][op][0])) != 0} for job in se_load_agv[agv].keys()} for agv in se_load_agv.keys()}
     se_unload_agv = {agv: {job: {op: (solver.value(se_unload_agv[agv][job][op][0]), solver.value(se_unload_agv[agv][job][op][1]), f"{interval_unload_agv[agv][job][op]}") for op in se_unload_agv[agv][job].keys() if round(solver.value(se_unload_agv[agv][job][op][1]) - solver.value(se_unload_agv[agv][job][op][0])) != 0} for job in se_unload_agv[agv].keys()} for agv in se_unload_agv.keys()}
     return encoding(seq), solver.ObjectiveValue(), se_process, se_setup, se_load_agv, se_unload_agv
 
+def mutation(process, setup, agv_move, ini_set, agv_info, pr):
+    os_vector, ms_vector = pr[0].copy(), pr[1].copy()
+    way = rd.randint(3)
+    if way == 0:
+        idx1, idx2 = rd.choice(range(len(os_vector)), size=2, replace=False)
+        os_vector[idx1], os_vector[idx2], ms_vector[idx1], ms_vector[idx2] = os_vector[idx2], os_vector[idx1], ms_vector[idx2], ms_vector[idx1]
+    elif way == 1:
+        idx1, idx2 = sorted(rd.choice(range(len(os_vector)), size=2, replace=False))
+        if idx1 != 0: os_vector[idx1:idx2 + 1], ms_vector[idx1:idx2 + 1] = os_vector[idx2:idx1 - 1:-1], ms_vector[idx2:idx1 - 1:-1]
+        else: os_vector[idx1:idx2 + 1], ms_vector[idx1:idx2 + 1] = os_vector[idx2::-1], ms_vector[idx2::-1]
+    elif way == 2:
+        idx = rd.choice(range(len(os_vector)))
+        job, op, m_tmp = correct_procedure(ini_set, os_vector, ms_vector)[idx]
+        ms_vector[idx] = rd.choice([m for m in ini_set[job][op] if m != m_tmp]) if len(ini_set[job][op]) != 1 else m_tmp
+    else: pass # Do not reach
+    return decoding(process, setup, agv_move, ini_set, agv_info, (os_vector, ms_vector))
+
+def crossover(process, setup, agv_move, ini_set, agv_info, pr1, pr2):
+    os_vector, ms_vector, os_vector_pair, ms_vector_pair = pr1[0].copy(), pr1[1].copy(), pr2[0].copy(), pr2[1].copy()
+    way = rd.randint(3)
+
+    if len(os_vector) <= 3 and way == 2: way = 1
+    if len(os_vector) <= 2 and way == 1: way = 0
+    if way == 0:
+        idx = rd.randint(len(os_vector))
+        chosen_job = os_vector[idx]
+        points = [i for i in range(len(os_vector)) if os_vector[i] == chosen_job]
+    elif way == 1:
+        idx1, idx2 = sorted(rd.choice(list(range(1, max(2, len(os_vector) - 1))), size=2, replace=False))
+        points = [i for i in range(len(os_vector)) if i < idx1 or i >= idx2]
+    elif way == 2:
+        indices = [0] + sorted(rd.choice(list(range(1, max(2, len(os_vector) - 1))), size=rd.randint(3, max(4, len(os_vector)//2)), replace=False)) + [len(os_vector) - 1]
+        points = []
+        for l in range(len(indices) - 1):
+            if l % 2 == 0:
+                points.extend(list(range(indices[l], indices[l + 1])))
+        if len(indices) % 2 == 1:
+            points.extend(list(range(indices[len(indices) - 1], len(os_vector))))
+    else: points = [] # Do not reach
+
+    new_os_vector, new_ms_vector = [], []
+    points_pair = []
+
+    tmp_set = {}
+    for job in os_vector:
+        if job not in tmp_set:
+            tmp_set[job] = 0
+    for point in points:
+        tmp_set[os_vector[point]] += 1
+    for l in range(len(os_vector_pair)):
+        if tmp_set[os_vector_pair[l]] > 0:
+            tmp_set[os_vector_pair[l]] -= 1
+        else: points_pair.append(l)
+    for i in range(len(os_vector)):
+        if i in points:
+            new_os_vector.append(os_vector[i])
+            new_ms_vector.append(ms_vector[i])
+        else:
+            idx = points_pair.pop(0)
+            new_os_vector.append(os_vector_pair[idx])
+            new_ms_vector.append(ms_vector_pair[idx])
+
+    return decoding(process, setup, agv_move, ini_set, agv_info, (new_os_vector, new_ms_vector))
+
+def graph_gen(final):
+
+    plt.plot([f"Gen{i+1}" for i in range(len(final))], final)
+
+    plt.xticks(rotation=45, fontsize=5)
+    plt.title("Makespan of FJSP")
+
+    plt.xlabel("Gen")
+    plt.ylabel("Tardiness")
+
+    plt.show()
+
 def graph_makespan(ini_set, machines, agv_info, best):
     seq, obj, se_process, se_setup, se_load_agv, se_unload_agv = best
-    seq = correct_procedure(ini_set, agv_info, seq[0], seq[1])
+    seq = correct_procedure(ini_set, seq[0], seq[1])
     _, ax = plt.subplots()
     s_job = list(ini_set.keys())
     for m in machines + agv_info:
@@ -235,19 +303,22 @@ def graph_makespan(ini_set, machines, agv_info, best):
     plt.show()
 
 def fjsp_agv(process, setup, agv_move, ini_set, machines, agv_info):
+    history = []
     ini_os = [job for job in ini_set.keys() for _ in range(len(ini_set[job].keys()))]
-    pops1 = [sorted([decoding(process, setup, agv_move, ini_set, agv_info, (rd.permutation(ini_os).tolist(), [])) for _ in range(params["pop_size"])], key=lambda case: case[1])][0]
-    print(pops1[0][1], pops1[0][0], pops1[0][2:])
-    graph_makespan(ini_set, machines, agv_info, pops1[0])
-    # for gen in range(1, params["num_of_gens"] + 1):
-    #     offsprings = []
-    #     for pops in (pops1, pops2):
-    #         mating_pool = [select_mp(pops) for _ in range(params["mating_pool"])]
-    #         indices = list(range(params["mating_pool"]))
-    #         for _ in range(len(mating_pool) // 2):
-    #             mom, dad = [indices.pop(rd.randint(len(indices))) for _ in range(2)]
-    #             # offsprings.append(generate(process, setup, ini_set, machines, mating_pool[mom], mating_pool[dad]))
+    pops = sorted([decoding(process, setup, agv_move, ini_set, agv_info, (rd.permutation(ini_os).tolist(), [])) for _ in range(params["pop_size"])], key=lambda case: case[1])
+    for gen in range(1, params["num_of_gens"] + 1):
+        offsprings = []
 
+        mating_pool = [select_mp(pops) for _ in range(params["mating_pool"])]
+        indices = list(range(params["mating_pool"]))
+        for _ in range(len(mating_pool) // 2):
+            pr1, pr2 = [indices.pop(rd.randint(len(indices))) for _ in range(2)]
+            offsprings.append(crossover(process, setup, agv_move, ini_set, agv_info, mating_pool[pr1], mating_pool[pr2]) if rd.random() < 0.5 else mutation(process, setup, agv_move, ini_set, agv_info, mating_pool[pr1]))
+        if pops[0][1] > offsprings[0][1]:
+            pops = sorted(pops+offsprings, key=lambda case: case[1])[:params["pop_size"]]
+        history.append(pops[0][1])
+    graph_gen(history)
+    graph_makespan(ini_set, machines, agv_info, pops[0])
     return 0
 
 
@@ -278,8 +349,7 @@ def start(processes, setups, machines_tmp, agv_tmp):
     for m1, m2, load_time, unload_time in agv_tmp[-1]:
         setattr(agv_move, f"{m1}{m2}", load_time)
         setattr(agv_move, f"{m1}{m2}unload", unload_time)
-
-    fjsp_agv(process, setup, agv_move, ini_set, machines, agv_tmp[:len(agv_tmp) - 2])
+    fjsp_agv(process, setup, agv_move, ini_set, machines, agv_tmp[:len(agv_tmp) - 1])
 
 def main():
     machines = [f"M{i}" for i in range(1, num_machines + 1)]
