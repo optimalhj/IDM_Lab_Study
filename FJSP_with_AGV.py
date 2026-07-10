@@ -3,8 +3,8 @@ from numpy import random as rd
 from ortools.sat.python import cp_model
 import matplotlib.pyplot as plt
 
-num_job, max_num_op, num_machines, num_AGV, max_time = 5, 5, 5, 3, 10
-params = {"pop_size": 10, "mating_pool": 10, "num_of_gens": 20, "s_max": 2}
+num_job, max_num_op, num_machines, num_AGV, max_time = 4, 4, 3, 3, 8
+params = {"pop_size": 10, "mating_pool": 10, "num_of_gens": 1, "s_max": 2}
 
 def select_mp(populations):
     index = list(range(params["pop_size"]))
@@ -95,8 +95,14 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
                 se_unload_agv[agv][job][op] = [md.new_int_var(0, horizon, f"{agv}/{job}/{op}") for _ in range(2)]
                 loading_time_agv[agv][job][op] = md.new_int_var(0, horizon, f"{agv}/{job}/{op}")
                 unloading_time_agv[agv][job][op] = md.new_int_var(0, horizon, f"{agv}/{job}/{op}")
-
-                history_agv[agv][job][op] = [md.new_bool_var(f"{agv}/{job}/{op}"), {m_tmp : md.new_bool_var(f"{agv}/{job}/{op}_from_{m_tmp}") for m_tmp in machines.keys()}]
+                m = ""
+                for job_tmp, op_tmp, m_tmp in seq:
+                    if job_tmp == job and op_tmp == op:
+                        m = m_tmp
+                        break
+                interval_unload_agv[agv][job][op] = md.new_interval_var(se_unload_agv[agv][job][op][0], unloading_time_agv[agv][job][op], se_unload_agv[agv][job][op][1], m)
+                interval_load_agv[agv][job][op] = md.new_interval_var(se_load_agv[agv][job][op][0], loading_time_agv[agv][job][op], se_load_agv[agv][job][op][1], m)
+                history_agv[agv][job][op] = [md.new_bool_var(f"{agv}/{job}/{op}"), {m_tmp : md.new_bool_var(f"{agv}/{job}/{op}") for m_tmp in machines.keys()}]
 
     for job in ini_set.keys():
         for op in ini_set[job].keys():
@@ -110,26 +116,23 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
             md.add(se_process[job][list(ini_set[job])[idx_job-1]][1] == se_process[job][op][0]).OnlyEnforceIf(bool_agv[agv_info[0]][job][op])
             for agv in agv_info:
                 md.add(unloading_time_agv[agv][job][op] == 0)
+                md.add(se_unload_agv[agv][job][op][1] == se_load_agv[agv][job][op][0])
                 md.add(loading_time_agv[agv][job][op] == 2 * bool_agv[agv][job][op])
-                interval_unload_agv[agv][job][op] = md.new_interval_var(se_unload_agv[agv][job][op][0], unloading_time_agv[agv][job][op], se_unload_agv[agv][job][op][1], f"")
-                interval_load_agv[agv][job][op] = md.new_interval_var(se_load_agv[agv][job][op][0], loading_time_agv[agv][job][op], se_load_agv[agv][job][op][1], f"(Special)\n{m}\n{job}")
                 md.add(se_load_agv[agv][job][op][0] + se_load_agv[agv][job][op][1] == 2 * se_process[job][op][0])
-                md.add(se_unload_agv[agv_info[0]][job][op][1] == se_load_agv[agv_info[0]][job][op][0])
 
         else:
             md.add(bool_agv[agv_info[0]][job][op] == 0)
             md.add(unloading_time_agv[agv_info[0]][job][op] == 0)
-            md.add(loading_time_agv[agv_info[0]][job][op] == bool_agv[agv_info[0]][job][op])
-            interval_unload_agv[agv_info[0]][job][op] = md.new_interval_var(se_unload_agv[agv_info[0]][job][op][0], unloading_time_agv[agv_info[0]][job][op], se_unload_agv[agv_info[0]][job][op][1], "pass")
-            interval_load_agv[agv_info[0]][job][op] = md.new_interval_var(se_load_agv[agv_info[0]][job][op][0], bool_agv[agv_info[0]][job][op], se_load_agv[agv_info[0]][job][op][1], f"pass")
             md.add(se_unload_agv[agv_info[0]][job][op][1] == se_load_agv[agv_info[0]][job][op][0])
+            md.add(loading_time_agv[agv_info[0]][job][op] == bool_agv[agv_info[0]][job][op])
 
             for agv in agv_info[1:]:
                 md.add(sum(bool_agv[agv][seq[l0][0]][seq[l0][1]] for l0 in range(l)) == 0).OnlyEnforceIf(history_agv[agv][job][op][0].Not())
                 md.add(sum(bool_agv[agv][seq[l0][0]][seq[l0][1]] for l0 in range(l)) != 0).OnlyEnforceIf(history_agv[agv][job][op][0])
                 md.add(sum(history_agv[agv][job][op][1][m_tmp] for m_tmp in machines.keys()) <= history_agv[agv][job][op][0])
-                was_last_work = [md.new_bool_var(f"{job_tmp}{op_tmp}{m_tmp}") for job_tmp, op_tmp, m_tmp in seq[:l]]
+
                 md.add(unloading_time_agv[agv][job][op] == 0).OnlyEnforceIf(bool_agv[agv][job][op].Not())
+                was_last_work = [md.new_bool_var(f"{job_tmp}{op_tmp}{m_tmp}") for job_tmp, op_tmp, m_tmp in seq[:l]]
                 md.add(sum(was_last_work) == 1).OnlyEnforceIf([history_agv[agv][job][op][0], bool_agv[agv][job][op]])
 
                 for l0 in range(l):
@@ -139,34 +142,26 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
                     md.add(history_agv[agv][job][op][1][m_tmp] == 1).OnlyEnforceIf(was_last_work[l0])
                     md.add(sum(bool_agv[agv][seq[l1][0]][seq[l1][1]] for l1 in range(l0 + 1, l)) == 0).OnlyEnforceIf(was_last_work[l0])
 
+                prior_job_m = "LU"
                 if idx_job == 0:
                     md.add(unloading_time_agv[agv][job][op] == 0).OnlyEnforceIf([history_agv[agv][job][op][0].Not(), bool_agv[agv][job][op]])
-                    md.add(unloading_time_agv[agv][job][op] == sum(history_agv[agv][job][op][1][m_tmp] * getattr(agv_move, f"{m_tmp}LUunload") for m_tmp in machines.keys())).OnlyEnforceIf([history_agv[agv][job][op][0], bool_agv[agv][job][op]])
-                    md.add(loading_time_agv[agv][job][op] == bool_agv[agv][job][op] * getattr(agv_move,f"LU{m}"))
-                    md.add(se_unload_agv[agv][job][op][1] == se_load_agv[agv][job][op][0])
-                    unload_txt, load_txt = f"Unload\n->\nLU\n({job}, {op})", f"LU\n{m}\n({job}, {op})"
 
                 else:
-                    prior_job_op, prior_job_m = list(ini_set[job])[idx_job - 1], "m"
+                    prior_job_op = list(ini_set[job])[idx_job - 1]
                     for job_tmp, op_tmp, m_tmp in seq[l - 1::-1]:
                         if job_tmp == job and op_tmp == prior_job_op:
                             prior_job_m = m_tmp
                             break
                     md.add(unloading_time_agv[agv][job][op] == getattr(agv_move, f"LU{prior_job_m}unload")).OnlyEnforceIf([history_agv[agv][job][op][0].Not(), bool_agv[agv][job][op]])
-                    md.add(unloading_time_agv[agv][job][op] == sum(history_agv[agv][job][op][1][m_tmp] * getattr(agv_move, f"{m_tmp}{prior_job_m}unload") for m_tmp in machines.keys())).OnlyEnforceIf([history_agv[agv][job][op][0], bool_agv[agv][job][op]])
-
-                    md.add(loading_time_agv[agv][job][op] == bool_agv[agv][job][op] * getattr(agv_move,f"{prior_job_m}{m}"))
                     md.add(se_process[job][prior_job_op][1] <= se_load_agv[agv][job][op][0])
-                    md.add(se_unload_agv[agv][job][op][1] == se_load_agv[agv][job][op][0])
-                    unload_txt, load_txt = f"Unload\n->\n{prior_job_m}\n({job},{op})", f"{prior_job_m}->{m}\n{job}/{prior_job_op}->{op})"
 
-                interval_unload_agv[agv][job][op] = md.new_interval_var(se_unload_agv[agv][job][op][0], unloading_time_agv[agv][job][op], se_unload_agv[agv][job][op][1], unload_txt)
-                interval_load_agv[agv][job][op] = md.new_interval_var(se_load_agv[agv][job][op][0], loading_time_agv[agv][job][op], se_load_agv[agv][job][op][1], load_txt)
+                md.add(unloading_time_agv[agv][job][op] == sum(history_agv[agv][job][op][1][m_tmp] * getattr(agv_move, f"{m_tmp}{prior_job_m}unload") for m_tmp in machines.keys())).OnlyEnforceIf([history_agv[agv][job][op][0], bool_agv[agv][job][op]])
+                md.add(loading_time_agv[agv][job][op] == bool_agv[agv][job][op] * getattr(agv_move,f"{prior_job_m}{m}"))
                 md.add(se_unload_agv[agv][job][op][1] <= se_load_agv[agv][job][op][0])
+
                 md.add(se_load_agv[agv][job][op][1] == se_process[job][op][0])
 
-        for agv in agv_info[1:]:
-            md.add_no_overlap([interval_unload_agv[agv][job][op] for job in interval_unload_agv[agv].keys() for op in interval_unload_agv[agv][job].keys()] + [interval_load_agv[agv][job][op] for job in interval_load_agv[agv] for op in interval_load_agv[agv][job]])
+        for agv in agv_info[1:]: md.add_no_overlap([interval_unload_agv[agv][job][op] for job in interval_unload_agv[agv].keys() for op in interval_unload_agv[agv][job].keys()] + [interval_load_agv[agv][job][op] for job in interval_load_agv[agv] for op in interval_load_agv[agv][job]])
 
     obj = md.new_int_var(0, horizon, "c_max")
     md.add_max_equality(obj, [se_process[job][op][1] for job in ini_set.keys() for op in ini_set[job]])
@@ -176,8 +171,8 @@ def decoding(process, setup, agv_move, ini_set, agv_info, vectors):
 
     se_process = {job: {op: [solver.value(time) for time in se_process[job][op]] for op in se_process[job].keys()} for job in se_process.keys()}
     se_setup = {m: [(solver.value(st), solver.value(ed)) for st, ed in se_setup[m] if round(solver.value(ed) - solver.value(st)) != 0] for m in se_setup.keys()}
-    se_load_agv = {agv: {job: {op: (solver.value(se_load_agv[agv][job][op][0]), solver.value(se_load_agv[agv][job][op][1]), f"{interval_load_agv[agv][job][op]}") for op in se_load_agv[agv][job].keys() if round(solver.value(se_load_agv[agv][job][op][1]) - solver.value(se_load_agv[agv][job][op][0])) != 0} for job in se_load_agv[agv].keys()} for agv in se_load_agv.keys()}
-    se_unload_agv = {agv: {job: {op: (solver.value(se_unload_agv[agv][job][op][0]), solver.value(se_unload_agv[agv][job][op][1]), f"{interval_unload_agv[agv][job][op]}") for op in se_unload_agv[agv][job].keys() if round(solver.value(se_unload_agv[agv][job][op][1]) - solver.value(se_unload_agv[agv][job][op][0])) != 0} for job in se_unload_agv[agv].keys()} for agv in se_unload_agv.keys()}
+    se_unload_agv = {agv: {job: {op: (solver.value(se_unload_agv[agv][job][op][0]), solver.value(se_unload_agv[agv][job][op][1]), f"{"".join([m_tmp * solver.value(history_agv[agv][job][op][1][m_tmp]) for m_tmp in machines.keys()]) if solver.value(history_agv[agv][job][op][0]) else "LU"}->{interval_unload_agv[agv][job][list(ini_set[job])[list(ini_set[job]).index(op) - 1]] if list(ini_set[job]).index(op) else f"LU"}") for op in se_unload_agv[agv][job].keys() if round(solver.value(se_unload_agv[agv][job][op][1]) - solver.value(se_unload_agv[agv][job][op][0])) != 0} for job in se_unload_agv[agv].keys()} for agv in se_unload_agv.keys()}
+    se_load_agv = {agv: {job: {op: (solver.value(se_load_agv[agv][job][op][0]), solver.value(se_load_agv[agv][job][op][1]), f"{interval_load_agv[agv][job][list(ini_set[job])[list(ini_set[job]).index(op) - 1]] if list(ini_set[job]).index(op) else f"LU"}->{interval_load_agv[agv][job][op]}") for op in se_load_agv[agv][job].keys() if round(solver.value(se_load_agv[agv][job][op][1]) - solver.value(se_load_agv[agv][job][op][0])) != 0} for job in se_load_agv[agv].keys()} for agv in se_load_agv.keys()}
     return encoding(seq), solver.ObjectiveValue(), se_process, se_setup, se_load_agv, se_unload_agv
 
 def mutation(process, setup, agv_move, ini_set, agv_info, pr):
@@ -275,14 +270,18 @@ def graph_makespan(ini_set, machines, agv_info, best):
             setup_ing = ed_setup - st_setup
             ax.barh(m, setup_ing, left=st_setup, color='white', edgecolor='black')
 
+    agv_load_list = {agv : sorted([(job, op) for job in se_load_agv[agv].keys() for op in se_load_agv[agv][job]], key=lambda sche:se_load_agv[agv][sche[0]][sche[1]][0]) for agv in agv_info}
+    for agv in agv_info:
+        print(agv, agv_load_list[agv])
     for agv in se_load_agv.keys():
         for job in se_load_agv[agv].keys():
             for op in se_load_agv[agv][job].keys():
                 st, ed, attr = se_load_agv[agv][job][op]
                 loading = ed - st
+
                 if round(loading) != 0:
                     ax.barh(agv, loading, left=st, color='orange', edgecolor='black')
-                    ax.text(st + loading / 2, agv, attr, va='center', ha='center', fontsize=5)
+                    ax.text(st + loading / 2, agv, attr + f"\n{job}\n{list(ini_set[job])[list(ini_set[job]).index(op)-1] if list(ini_set[job]).index(op) else "LU"}->{op}"+ f"\n({loading})" if agv != agv_info[0] else f"Special\n{job}", va='center', ha='center', fontsize=5)
 
     for agv in se_unload_agv.keys():
         for job in se_unload_agv[agv].keys():
@@ -292,7 +291,7 @@ def graph_makespan(ini_set, machines, agv_info, best):
 
                 if round(unloading) != 0:
                     ax.barh(agv, unloading, left=st, color='white', edgecolor='black')
-                    ax.text(st + unloading / 2, agv, "\n".join(attr.split("/")), va='center', ha='center', fontsize=5)
+                    ax.text(st + unloading / 2, agv, attr + f"\n({unloading})", va='center', ha='center', fontsize=5)
 
     ax.set_xticks([i for i in range(int(obj) + 2)])
     ax.tick_params(axis='x', labelsize=5)
