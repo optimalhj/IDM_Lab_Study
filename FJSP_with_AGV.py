@@ -281,7 +281,7 @@ def graph_makespan(ini_set, machines, agv_info, best):
 
                 if round(loading) != 0:
                     ax.barh(agv, loading, left=st, color='orange', edgecolor='black')
-                    ax.text(st + loading / 2, agv, attr + f"\n{job}\n{list(ini_set[job])[list(ini_set[job]).index(op)-1] if list(ini_set[job]).index(op) else "LU"}->{op}"+ f"\n({loading})" if agv != agv_info[0] else f"Special\n{job}", va='center', ha='center', fontsize=5)
+                    ax.text(st + loading / 2, agv, attr + f"\n{job}\n{list(ini_set[job])[list(ini_set[job]).index(op)-1] + "->" if list(ini_set[job]).index(op) else ""}{op}"+ f"\n({loading})" if agv != agv_info[0] else f"Special\n{job}", va='center', ha='center', fontsize=5)
 
     for agv in se_unload_agv.keys():
         for job in se_unload_agv[agv].keys():
