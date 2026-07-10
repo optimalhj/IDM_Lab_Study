@@ -5,6 +5,7 @@ import mysql.connector
 num_jts ,max_num_job, max_num_op, num_machines, max_time = 6, 10, 15, 10, 9
 params = {"pop_size": 50, "num_of_gens": 200, "mating_pool": 100, "num_offs": 45, "s_max": 5, "T": 60, "w": 0.4, "K": 0.25}
 database_input = 100
+user, password, database = 'root', 'gh314wns!', 'cbr'
 
 def select_mp(populations):
     index = list(range(params["pop_size"]))
@@ -293,7 +294,7 @@ def generate_case(process, setup, ini_set, machines):
     return database
 
 def save(ini_set, data):
-    conn = mysql.connector.connect(user='root', password='gh314wns!', database='cbr')
+    conn = mysql.connector.connect(user=user, password=password, database=database)
     cursor = conn.cursor()
     p = f"{[len(ini_set[jt]["jobs"]) for jt in ini_set.keys()]}"
     cursor.execute("""SELECT COUNT(*) FROM case_database;""")
@@ -320,7 +321,6 @@ def save(ini_set, data):
             cursor.execute(f"""
             INSERT INTO S_O_{h + 1} VALUES ({i + 1}, \"{jt}\", \"{job}\");
             """)
-
     conn.commit()
     conn.close()
 
@@ -329,8 +329,20 @@ class Duration:
 class SetUp:
     def __init__(self): pass
 def start(processes, setups, machines_tmp):
+    conn = mysql.connector.connect(user=user, password=password)
+    cursor = conn.cursor()
+    cursor.execute(f"""
+    DROP DATABASE IF EXISTS {database};
+    CREATE DATABASE IF NOT EXISTS {database};
+    USE {database};""")
     process, setup, ini_set, machines = Duration(), SetUp(), {}, []
 
+    cursor.execute(f"""
+    CREATE TABLE PROCESS(
+    JOB_TYPE varchar(15) NOT NULL,
+    OP varchar(8) NOT NULL,
+    PROCESS INT NOT NULL,
+    PRIMARY KEY (JOB_TYPE, OP));""")
     for jt in processes.keys():
         ini_set[jt] = {"ops": {}}
         for op in processes[jt]["ops"]:
@@ -340,19 +352,31 @@ def start(processes, setups, machines_tmp):
                 if m not in machines:
                     machines.append(m)
             setattr(process, f"{jt}{op}", processing_time)
+            cursor.execute(f"INSERT INTO PROCESS VALUES ({jt},{op},{getattr(process, f"{jt}{op}")});")
     machines.sort(key=lambda machine: machines_tmp.index(machine))
 
+    cursor.execute(f"""
+    CREATE TABLE SETUP(
+    PRIOR_JT varchar(15) NOT NULL,
+    PRIOR_OP varchar(8) NOT NULL,
+    NOW_JT varchar(15) NOT NULL,
+    NOW_OP varchar(8) NOT NULL,
+    SETUP INT NOT NULL,
+    PRIMARY KEY (PRIOR_JT, PRIOR_OP, NOW_JT, NOW_OP));""")
     for op_type1 in setups:
         for op_type2 in setups:
             (jt1, op1), (jt2, op2) = op_type1, op_type2
             setattr(setup, f"{jt1}{op1}{jt2}{op2}", setups[(jt1, op1)][(jt2, op2)])
+            cursor.execute(f"INSERT INTO SETUP VALUES ({jt1},{op1},{jt2},{op2}, {getattr(setup, f"{jt1}{op1}{jt2}{op2}")});")
+    conn.commit()
+    cursor.close()
 
     for i in range(database_input):
         print(i+1)
         for jt in processes.keys():
             ini_set[jt]["jobs"] = [f"Job{j+1}" for j in range(rd.randint(5,max_num_job+1))]
-        data = generate_case(process, setup, ini_set, machines)
-        save(ini_set, data)
+        save(ini_set, generate_case(process, setup, ini_set, machines))
+    return process, setup, ini_set, machines
 
 def main():
 
