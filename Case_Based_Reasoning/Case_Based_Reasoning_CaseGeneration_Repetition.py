@@ -1,10 +1,10 @@
 from numpy import random as rd
 import mysql.connector
+from Case_Based_Reasoning_CaseGeneration_Initialization import database_input, user, password, db_name, case_database
 
 # Parameter Input
-num_jts ,max_num_job, max_num_op, num_machines, max_time = 6, 10, 15, 10, 9
+num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 3, 4, 4, 9
 params = {"pop_size": 50, "num_of_gens": 200, "mating_pool": 100, "num_offs": 45, "s_max": 5, "T": 60, "w": 0.4, "K": 0.25}
-database_input, user, password, db_name, case_database = 20, 'root', 'gh314wns!', 'cbr', 'case_database'
 
 def select_mp(populations):
     index = list(range(params["pop_size"]))
@@ -18,7 +18,7 @@ def select_mp(populations):
         return populations[rd.choice(index, size=1, p=[2 * i / (params["pop_size"] * (params["pop_size"] + 1)) for i in range(params["pop_size"], 0, -1)])[0]]
     else: return [] # Do not reach
 
-def correct_procedure(ini_set, seq):
+def correct_procedure(ini_set, seq, op_type = False):
     info_op = {jt : {job : {op : 0 for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
     info_job = {jt: {op: {job: 0 for job in ini_set[jt]["jobs"]} for op in ini_set[jt]["ops"]} for jt in ini_set.keys()}
     for i in range(len(seq)):
@@ -26,11 +26,12 @@ def correct_procedure(ini_set, seq):
         using_op = min(ini_set[jt]["ops"], key=lambda op: info_op[jt][job][op])
         info_op[jt][job][using_op] += 1
         seq[i] = (jt, using_op)
-    for i in range(len(seq)):
-        jt, op = seq[i]
-        using_job = min(ini_set[jt]["jobs"], key=lambda job: info_job[jt][op][job])
-        info_job[jt][op][using_job] += 1
-        seq[i] = (jt, using_job, op)
+    if op_type == False:
+        for i in range(len(seq)):
+            jt, op = seq[i]
+            using_job = min(ini_set[jt]["jobs"], key=lambda job: info_job[jt][op][job])
+            info_job[jt][op][using_job] += 1
+            seq[i] = (jt, using_job, op)
     return seq
 
 def objective(process, setup, ini_set, seq):
@@ -302,12 +303,13 @@ def save(ini_set, data):
         cursor.execute(f"""
         CREATE TABLE S_O_{h + 1} (
         info smallint PRIMARY KEY NOT NULL,
-        job_type varchar(20) NOT NULL,
-        job varchar(10) NOT NULL);""")
+        job_type varchar(15) NOT NULL,
+        op varchar(5) NOT NULL,
+        FOREIGN KEY (job_type, op) REFERENCES PROCESSES (job_type, op));""")
 
         for i in range(len(data[0])):
-            jt, job, _, _ = data[0][i]
-            cursor.execute(f"INSERT INTO S_O_{h + 1} VALUES ({i + 1}, \"{jt}\", \"{job}\");")
+            jt, _, op, _ = data[0][i]
+            cursor.execute(f"INSERT INTO S_O_{h + 1} VALUES ({i + 1}, \"{jt}\", \"{op}\");")
     conn.commit()
     conn.close()
 
@@ -329,8 +331,11 @@ def start(processes, setups, machines_tmp):
                 if m not in machines:
                     machines.append(m)
             setattr(process, f"{jt}{op}", processing_time)
-            cursor.execute(f"INSERT INTO PROCESSES VALUES (\"{jt}\",\"{op}\",{processing_time});")
+            cursor.execute(f"INSERT INTO PROCESSES VALUES (\"{jt}\",\"{op}\",{processing_time}, \"{[int(m.replace("M", "")) for m in ms]}\");")
     machines.sort(key=lambda machine: machines_tmp.index(machine))
+
+    for m in machines:
+        cursor.execute(f"INSERT INTO MACHINES VALUES (\"{m}\");")
 
     for op_type1 in setups:
         for op_type2 in setups:
@@ -343,7 +348,7 @@ def start(processes, setups, machines_tmp):
     for i in range(database_input):
         print(i+1)
         for jt in processes.keys():
-            ini_set[jt]["jobs"] = [f"Job{j+1}" for j in range(rd.randint(5,max_num_job+1))]
+            ini_set[jt]["jobs"] = [f"Job{j+1}" for j in range(rd.randint(1,max_num_job+1))]
         save(ini_set, generate_case(process, setup, ini_set, machines))
     return process, setup, ini_set, machines
 
@@ -352,7 +357,7 @@ def main():
     jts = [f"Job_Type{i}" for i in range(1, num_jts + 1)]
     machines = [f"M{i}" for i in range(1, num_machines + 1)]
 
-    processes = {jt : {"ops":{f"Op{o+1}" : [sorted(rd.choice(machines, size=rd.randint(2, len(machines)), replace=False),key=lambda machine: machines.index(machine)),rd.randint(2, max_num_op + 1)] for o in range(rd.randint(1, max_num_op + 1))}} for jt in jts}
+    processes = {jt : {"ops":{f"Op{o+1}" : [sorted(rd.choice(machines, size=rd.randint(2, len(machines)), replace=False),key=lambda m: machines.index(m)),rd.randint(2, max_num_op + 1)] for o in range(rd.randint(1, max_num_op + 1))}} for jt in jts}
 
     op_types = [(jt, op) for jt in jts for op in processes[jt]["ops"]]
     setups = {op1:{op2:0 if op1[0] == op2[0] else rd.randint(1, max(max_time//2, 1) + 1) for op2 in op_types} for op1 in op_types}

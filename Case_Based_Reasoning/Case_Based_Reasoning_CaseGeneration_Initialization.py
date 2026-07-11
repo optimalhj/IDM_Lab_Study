@@ -1,7 +1,7 @@
 import mysql.connector
 
 # Parameter Input
-database_input, user, password, db_name, case_database = 20, 'root', 'gh314wns!', 'cbr', 'case_database'
+database_input, user, password, db_name, case_database = 10, 'root', 'gh314wns!', 'cbr', 'case_database'
 
 def main():
     conn = mysql.connector.connect(user=user, password=password)
@@ -14,11 +14,17 @@ def main():
     p JSON NOT NULL,
     alt FLOAT NOT NULL, 
     awt FLOAT NOT NULL);""")
+
+    cursor.execute(f"""
+    CREATE TABLE MACHINES(
+    M varchar(5) NOT NULL PRIMARY KEY);""")
+
     cursor.execute(f"""
     CREATE TABLE PROCESSES(
     JOB_TYPE varchar(15) NOT NULL,
     OP varchar(8) NOT NULL,
     PROCESS int NOT NULL,
+    MACHINES json NOT NULL,
     PRIMARY KEY (JOB_TYPE, OP));""")
 
     cursor.execute(f"""
@@ -28,8 +34,9 @@ def main():
     NOW_JT varchar(15) NOT NULL,
     NOW_OP varchar(8) NOT NULL,
     SETUP INT NOT NULL,
-    PRIMARY KEY (PRIOR_JT, PRIOR_OP, NOW_JT, NOW_OP));""")
-    conn.commit()
+    PRIMARY KEY (PRIOR_JT, PRIOR_OP, NOW_JT, NOW_OP),
+    FOREIGN KEY (PRIOR_JT, PRIOR_OP) REFERENCES PROCESSES (job_type, op),
+    FOREIGN KEY (NOW_JT, NOW_OP) REFERENCES PROCESSES (job_type, op));""")
     cursor.close()
 
 if __name__ == '__main__':
