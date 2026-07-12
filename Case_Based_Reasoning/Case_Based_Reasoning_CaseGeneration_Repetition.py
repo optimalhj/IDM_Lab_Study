@@ -1,10 +1,11 @@
 from numpy import random as rd
 import mysql.connector
-from Case_Based_Reasoning_CaseGeneration_Initialization import database_input, user, password, db_name, case_database
+from Case_Based_Reasoning_CaseGeneration_Initialization import user, password, db_name, case_database
 
 # Parameter Input
 num_jts ,max_num_job, max_num_op, num_machines, max_time = 3, 3, 4, 4, 9
 params = {"pop_size": 50, "num_of_gens": 200, "mating_pool": 100, "num_offs": 45, "s_max": 5, "T": 60, "w": 0.4, "K": 0.25}
+database_input = 15
 
 def select_mp(populations):
     index = list(range(params["pop_size"]))
@@ -48,7 +49,7 @@ def objective(process, setup, ini_set, seq):
         if len(ops_machine[m]) == 0: now = max(st_machine[m], st_job[jt][job])
         else:
             setup_time = getattr(setup, f"{ops_machine[m][0]}{ops_machine[m][1]}{jt}{op}")
-            now = max(st_machine[m] + setup_time, st_job[jt][job])
+            now = max(st_machine[m], st_job[jt][job]) + setup_time
             while True:
                 pass_count = 0
                 for t in range(now - setup_time, now):
@@ -58,7 +59,7 @@ def objective(process, setup, ini_set, seq):
                     else: pass_count += 1
                 if pass_count == setup_time: break
 
-            if setup_time != 0:
+            if setup_time > 0:
                 se_setup[m][l] = [now - setup_time, now]
                 for t in range(se_setup[m][l][0], se_setup[m][l][1]):
                     if t not in t_setup: t_setup[t] = 1
@@ -80,8 +81,7 @@ def objective(process, setup, ini_set, seq):
                     f_u += params["T"] - se_process[jt][job][op][0]
                 else: break
     f_u /= (len(ops_machine) * params["T"])
-    f_s = 0
-    f_c = {}
+    f_s, f_c = 0, {}
     for m in se_setup:
         f_c[m] = 0
         for l in se_setup[m]:
@@ -135,10 +135,12 @@ def crossover(mating_pool, cr):
 def mutation(process, setup, ini_set, machines, seq, cr):
     seq, (obj, f_u, f_s, f_c, f_i, f_b), se_process, se_setup = seq
     seq = seq.copy()
+
     if cr == 1:
         random_idx = rd.randint(len(seq))
         jt, job, op, m = seq.pop(random_idx)
         place_in_job = list(ini_set[jt]["ops"]).index(op)
+
         if place_in_job == 0:
             if len(list(ini_set[jt]["ops"])) > 1:
                 for l in range(random_idx, len(seq)):
@@ -146,8 +148,7 @@ def mutation(process, setup, ini_set, machines, seq, cr):
                         next_idx = l
                         break
             else: next_idx = len(seq) + 1
-            if next_idx == 0:
-                seq.insert(0, (jt, job, op, m))
+            if next_idx == 0: seq.insert(0, (jt, job, op, m))
             else: seq.insert(rd.choice([i for i in range(next_idx + 1) if i != random_idx]), (jt, job, op, m))
 
         elif place_in_job == len(ini_set[jt]["ops"]) - 1:
@@ -168,8 +169,10 @@ def mutation(process, setup, ini_set, machines, seq, cr):
                     next_idx = l
                     break
             seq.insert(rd.choice(list(range(prior_idx + 1, next_idx + 1))), (jt, job, op, m))
+
     elif cr == 2:
         chosen_m = max(f_c, key=lambda m : f_c[m])
+
         if len(se_setup[chosen_m]) != 0:
             chosen_idx = rd.choice(list(se_setup[chosen_m]))
             chosen_jt, chosen_job, chosen_op, _ = seq[chosen_idx]
@@ -193,14 +196,14 @@ def mutation(process, setup, ini_set, machines, seq, cr):
                         seq = seq_tmp.copy()
                         go_break = True
                     if go_break: break
+
     elif cr == 3:
         using_machine = []
         for _, _, _, m in seq:
             if m not in using_machine:
                 using_machine.append(m)
         using_machine.sort(key=lambda using_m:-sum(getattr(process, f"{jt}{op}") for jt, _, op, m in seq if m == using_m))
-        from_m = rd.choice(using_machine[:max(1, int(len(using_machine) * params["K"]))])
-        to_m = min(machines, key=lambda m:sum(1 for sche in seq if m==sche[3]))
+        from_m, to_m = rd.choice(using_machine[:max(1, int(len(using_machine) * params["K"]))]), min(machines, key=lambda m:sum(1 for sche in seq if m==sche[3]))
 
         for idx in rd.permutation(list(range(len(seq)))):
             jt, job, op, m = seq[idx]

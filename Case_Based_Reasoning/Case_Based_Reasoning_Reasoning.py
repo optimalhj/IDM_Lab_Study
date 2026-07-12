@@ -16,11 +16,11 @@ def str_to_list(strings, forward_add = "", backward_add = ""):
         to_list.append(f"{forward_add}{new_string}{backward_add}")
     return to_list
 
-def start(process, setup, p_prime, ini_set,  machines):
+def start(process, setup, p_prime, ini_set,  machines, N_R):
     conn = mysql.connector.connect(user=user, password=password, database=db_name)
     cursor = conn.cursor()
     cursor.execute(f"SELECT COUNT(*) FROM {case_database};")
-    N_R, H ,R = 10, list(range(1, [i[0] for i in cursor][0] + 1)), []
+    H ,R = list(range(1, [i[0] for i in cursor][0] + 1)), []
     sigma = N_R - len(H)
 
     cursor.execute(f"SELECT * FROM {case_database} ORDER BY {params["w"]} * alt + ({1 - params["w"]}) * awt ASC;")
@@ -93,6 +93,9 @@ class SetUp:
     def __init__(self): pass
 
 def main():
+
+    N_R = 10
+
     process, setup, ini_set = Duration(), SetUp(), {}
     conn = mysql.connector.connect(user=user, password=password, database=db_name)
     cursor = conn.cursor()
@@ -114,7 +117,9 @@ def main():
         for op in ini_set[jt]["ops"]:
             print("\t", op, ini_set[jt]["ops"][op])
     print("-"*50)
-    start(process, setup, {jt:len(ini_set[jt]["jobs"]) for jt in ini_set.keys()}, ini_set, machines)
+    p_prime = {jt:len(ini_set[jt]["jobs"]) for jt in ini_set.keys()}
+    print(p_prime)
+    start(process, setup, p_prime, ini_set, machines, N_R)
 
 if __name__=="__main__":
     main()

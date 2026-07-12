@@ -1,7 +1,7 @@
 import mysql.connector
 
 # Parameter Input
-database_input, user, password, db_name, case_database = 10, 'root', 'gh314wns!', 'cbr', 'case_database'
+user, password, db_name, case_database = 'root', 'gh314wns!', 'cbr', 'case_database'
 
 def main():
     conn = mysql.connector.connect(user=user, password=password)
