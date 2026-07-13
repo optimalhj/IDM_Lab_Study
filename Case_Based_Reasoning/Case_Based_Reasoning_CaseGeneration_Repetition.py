@@ -19,7 +19,7 @@ def select_mp(populations):
         return populations[rd.choice(index, size=1, p=[2 * i / (params["pop_size"] * (params["pop_size"] + 1)) for i in range(params["pop_size"], 0, -1)])[0]]
     else: return [] # Do not reach
 
-def correct_procedure(ini_set, seq, op_type = False):
+def correct_procedure(ini_set, seq):
     info_op = {jt : {job : {op : 0 for op in ini_set[jt]["ops"]} for job in ini_set[jt]["jobs"]} for jt in ini_set.keys()}
     info_job = {jt: {op: {job: 0 for job in ini_set[jt]["jobs"]} for op in ini_set[jt]["ops"]} for jt in ini_set.keys()}
     for i in range(len(seq)):
@@ -27,12 +27,11 @@ def correct_procedure(ini_set, seq, op_type = False):
         using_op = min(ini_set[jt]["ops"], key=lambda op: info_op[jt][job][op])
         info_op[jt][job][using_op] += 1
         seq[i] = (jt, using_op)
-    if op_type == False:
-        for i in range(len(seq)):
-            jt, op = seq[i]
-            using_job = min(ini_set[jt]["jobs"], key=lambda job: info_job[jt][op][job])
-            info_job[jt][op][using_job] += 1
-            seq[i] = (jt, using_job, op)
+    for i in range(len(seq)):
+        jt, op = seq[i]
+        using_job = min(ini_set[jt]["jobs"], key=lambda job: info_job[jt][op][job])
+        info_job[jt][op][using_job] += 1
+        seq[i] = (jt, using_job, op)
     return seq
 
 def objective(process, setup, ini_set, seq):
