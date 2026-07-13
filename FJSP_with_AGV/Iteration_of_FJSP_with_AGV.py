@@ -13,11 +13,7 @@ def main():
         agv = [f"AGV{i}" for i in range(0, num_AGV + 1)] + [[(m1, m2, 4, 3) if m1 != m2 else (m1, m2, 0, 0) for m1 in machines + ["LU"] for m2 in machines + ["LU"]]]
         start(processes, setups, machines, agv)
 
-
     return 0
-
-
-
 
 if __name__ == '__main__':
     main()
