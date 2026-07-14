@@ -14,7 +14,7 @@ params = {"pop_size": 10, "mating_pool": 10, "num_of_gens": 20}
 dqn_params = {"LR": 0.001, "GAMMA": 0.1, "BATCH_SIZE": 10, "MEMORY_SIZE": 20}
 
 class Q_net(nn.Module):
-    def __init__(self, in_features=6, gcn_hidden=16, embed_dim=8, num_heads=2, num_actions=7):
+    def __init__(self, in_features=6, gcn_hidden=16, embed_dim=8, num_heads=2, num_actions=6):
         super(Q_net, self).__init__()
         # 1단계: GCN 레이어 (구조 정보 추출)
         self.GCN_layer_1 = GCNConv(in_features, gcn_hidden)
@@ -28,15 +28,13 @@ class Q_net(nn.Module):
         self.FC_layer_2 = nn.Linear(32, num_actions)
 
     def forward(self, tensors, batch=None):
-        # [1단계] GCN 연산 및 활성화 함수(sigma) 적용
         x_tensor, edge_tensor = tensors
-        H_1 = F.relu(self.GCN_layer_1(x_tensor, edge_tensor))
-        H_2 = self.GCN_layer_2(H_1, edge_tensor)  # 은닉 노드 표현 벡터 H_2
+        x = F.relu(self.GCN_layer_1(x_tensor, edge_tensor))
+        x = self.GCN_layer_2(x, edge_tensor)
 
-        # [2단계] 가변 그래프 크기를 고려한 어텐션 및 풀링 연산
         if batch is None:
             # 단일 그래프 추론
-            H_seq = H_2.unsqueeze(0)
+            H_seq = x.unsqueeze(0)
             attn_out, _ = self.Multi_Head_Attention(H_seq, H_seq, H_seq)
             graph_embed = torch.mean(attn_out.squeeze(0), dim=0, keepdim=True)
         else:
@@ -44,13 +42,13 @@ class Q_net(nn.Module):
             graph_embeds = []
             for g_id in torch.unique(batch):
                 mask = (batch == g_id)
-                H_g = H_2[mask].unsqueeze(0)
+                H_g = x[mask].unsqueeze(0)
                 attn_out_g, _ = self.Multi_Head_Attention(H_g, H_g, H_g)
                 graph_embed_g = torch.mean(attn_out_g.squeeze(0), dim=0, keepdim=True)
                 graph_embeds.append(graph_embed_g)
             graph_embed = torch.cat(graph_embeds, dim=0)
 
-            # [3단계] FC 레이어를 통한 최종 Q값 출력
+        # [3단계] FC 레이어를 통한 최종 Q값 출력
         out = F.relu(self.FC_layer_1(graph_embed))
         Q_values = self.FC_layer_2(out)
         return Q_values
@@ -85,7 +83,7 @@ def select_mp(length):
         return rd.choice(index, size=1, p=[2 * i / (params["pop_size"] * (params["pop_size"] + 1)) for i in range(params["pop_size"], 0, -1)])
     else: return [] # Do not reach
 
-def correct_procedure(ini_set, os_vector, ms_vector):
+def correct_schedule(ini_set, os_vector, ms_vector):
     seq, info_op = os_vector.copy(), {job: {op: 0 for op in ini_set[job]} for job in ini_set.keys()}
     for l in range(len(seq)):
         job = seq[l]
@@ -110,7 +108,7 @@ def disjunctive_graph(ini_set, machines, os_vector, ms_vector, se_process, se_se
                 if m == ms_vector[l1] and m == ms_vector[l2]:
                     disjunctive_arcs.extend([[l1, l2], [l2, l1]])
                     break
-    for job, op, m in correct_procedure(ini_set, os_vector, ms_vector):
+    for job, op, m in correct_schedule(ini_set, os_vector, ms_vector):
         setup_time = 0
         for m_tmp in machines:
             for st, ed, (prior_job, prior_op, now_job, now_op) in se_setup[m_tmp]:
@@ -124,7 +122,15 @@ def disjunctive_graph(ini_set, machines, os_vector, ms_vector, se_process, se_se
             conjunctive_arcs.append(arc)
     return torch.tensor(x_tensor, dtype=torch.float), torch.tensor(conjunctive_arcs, dtype=torch.long).t().contiguous() if conjunctive_arcs else torch.empty((2, 0), dtype=torch.long)
 
-def encoding(seq):
+def encoding_graph(x_tensor):
+    os_vector, ms_vector = [], []
+    for job, op, m ,_, _, _ in x_tensor:
+        job, m = f"Job{int(job)}", f"M{int(m)}"
+        os_vector.append(job)
+        ms_vector.append(m)
+    return os_vector, ms_vector
+
+def seq_to_vector(seq):
     os_vector, ms_vector = [], []
     for job, _, m in seq:
         os_vector.append(job)
@@ -132,22 +138,34 @@ def encoding(seq):
     return os_vector, ms_vector
 
 def decoding(process, setup, ini_set, machines, vectors):
-    seq, s_job, s_m = correct_procedure(ini_set, vectors[0], vectors[1]), {job: 0 for job in ini_set.keys()}, {m: [0, ()] for m in machines}
-    se_process, se_setup = {job: {op :[0, 0] for op in ini_set[job].keys()} for job in ini_set.keys()}, {m: [] for m in machines}
+    seq = correct_schedule(ini_set, vectors[0], vectors[1])
+    s_job, s_m, se_process, se_setup = {}, {}, {}, {}
+    for job in ini_set.keys():
+        s_job[job] = 0
+        se_process[job] = {}
+        for op in ini_set[job].keys(): se_process[job][op] = [0, 0]
+    for m in machines:
+        s_m[m] = [0, ()]
+        se_setup[m] = []
+
+    os_vector, ms_vector = [], []
     for job, op, m in seq:
+        os_vector.append(job)
+        ms_vector.append(m)
         now = max(s_job[job], s_m[m][0])
         if len(s_m[m][1]):
             setup_time = getattr(setup, f"{s_m[m][1][0]}{s_m[m][1][1]}{job}{op}")
             if setup_time:
                 se_setup[m].append([now, now + setup_time, (s_m[m][1][0], s_m[m][1][1], job, op)])
                 now += setup_time
-        else: now += 0
+        else:
+            now += 0
         se_process[job][op][0] += now
         now += getattr(process, f"{job}{op}{m}")
         se_process[job][op][1] += now
         s_job[job], s_m[m] = now, [now, (job, op)]
     reward = sum(getattr(process, f"{job}{op}{m}") for job, op, m in seq) / sum(1 if s_m[m][0] else 0 for m in s_m.keys()) / max(s_m[m][0] for m in s_m.keys())
-    return encoding(seq), reward, se_process, se_setup
+    return disjunctive_graph(ini_set, machines, os_vector, ms_vector, se_process, se_setup), reward
 
 def mutation(process, setup, ini_set, machines, pr, action):
     os_vector, ms_vector = pr[0].copy(), pr[1].copy()
@@ -164,7 +182,7 @@ def mutation(process, setup, ini_set, machines, pr, action):
         ms_vector = [tmp_set[job].pop(0) for job in os_vector]
     elif action == 2:
         idx = rd.choice(range(len(os_vector)))
-        job, op, m_tmp = correct_procedure(ini_set, os_vector, ms_vector)[idx]
+        job, op, m_tmp = correct_schedule(ini_set, os_vector, ms_vector)[idx]
         ms_vector[idx] = rd.choice([m for m in ini_set[job][op] if m != m_tmp]) if len(ini_set[job][op]) != 1 else m_tmp
     else: pass # Do not reach
     return decoding(process, setup, ini_set, machines, (os_vector, ms_vector))
@@ -227,7 +245,7 @@ def graph_gen(final):
 
 def graph_makespan(ini_set, machines, best):
     seq, obj, se_process, se_setup, se_load_agv, se_unload_agv = best
-    seq = correct_procedure(ini_set, seq[0], seq[1])
+    seq = correct_schedule(ini_set, seq[0], seq[1])
     _, ax = plt.subplots()
     s_job = list(ini_set.keys())
     for m in machines:
@@ -252,10 +270,10 @@ def graph_makespan(ini_set, machines, best):
     plt.show()
 
 def dynamic_fjsp(process, setup, ini_set, machines):
-    ini_os = [job for job in ini_set.keys() for _ in range(len(ini_set[job].keys()))]
     history, q_net, memory = [], Q_net(), Memory()
-    pops = sorted([decoding(process, setup, ini_set, machines,(rd.permutation(ini_os).tolist(), [])) for _ in range(params["pop_size"])], key=lambda case: case[1], reverse=True)
     for gen in range(1, params["num_of_gens"] + 1):
+        ini_os = [job for job in ini_set.keys() for _ in range(len(ini_set[job].keys()))]
+        pops = sorted([decoding(process, setup, ini_set, machines,(rd.permutation(ini_os).tolist(), [])) for _ in range(params["pop_size"])], key=lambda case: case[1], reverse=True)
         offsprings, mating_pool, indices = [], [select_mp(len(pops)) for _ in range(params["mating_pool"])], list(range(params["mating_pool"]))
         for _ in range(len(mating_pool) // 2):
             pr1, pr2 = [indices.pop(rd.randint(len(indices))) for _ in range(2)]
@@ -263,12 +281,14 @@ def dynamic_fjsp(process, setup, ini_set, machines):
             if rd.random() < dqn_params["GAMMA"]:
                 action = rd.randint(6)
             else:
-                action = q_net(disjunctive_graph(ini_set, machines, pops[pr1][0][0], pops[pr1][0][1], pops[pr1][2], pops[pr1][3])).argmax().item()
+                action = q_net(pops[pr1][0]).argmax().item()
 
             if rd.random() < 0.8:
-                off = crossover(process, setup, ini_set, machines, pops[pr1][0], pops[pr2][0], action)
+                pr1, pr2 = [encoding_graph(pops[pr][0][0]) for pr in (pr1, pr2)]
+                off = crossover(process, setup, ini_set, machines, pr1, pr2, action)
             elif rd.random() < 0.9:
-                off = mutation(process, setup, ini_set, machines, pops[pr1][0], action)
+                pr1 = encoding_graph(pops[pr1][0][0])
+                off = mutation(process, setup, ini_set, machines, pr1, action)
             else:
                 off = pops[pr2]
             offsprings.append(off)
@@ -311,7 +331,11 @@ def start(processes, setups, machines_tmp):
 def main():
     machines = [f"M{i}" for i in range(1, num_machines + 1)]
 
-    processes = {f"Job{j}": {f"Op{o + 1}": {m : rd.randint(1, max_time + 1) for m in sorted(rd.choice(machines, size=rd.randint(2, len(machines)), replace=False).tolist(), key=lambda m: machines.index(m))} for o in range(rd.randint(1, max_num_op + 1))} for j in range(1, num_job + 1)}
+    processes = {}
+    for j in range(1, num_job + 1):
+        processes[f"Job{j}"] = {}
+        for o in range(rd.randint(1, max_num_op + 1)):
+            processes[f"Job{j}"][f"Op{o + 1}"] = {m : rd.randint(1, max_time + 1) for m in sorted(rd.choice(machines, size=rd.randint(2, len(machines)), replace=False).tolist(), key=lambda m: machines.index(m))}
 
     op_types = [(job, op) for job in processes.keys() for op in processes[job].keys()]
     setups = {op1: {op2: 0 if op1[0] == op2[0] else rd.randint(1, max(max_time // 2, 1) + 1) for op2 in op_types} for op1 in op_types}
