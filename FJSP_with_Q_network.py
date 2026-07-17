@@ -37,27 +37,21 @@ class FJSP_QNet(nn.Module):
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         x = F.relu(self.fc4(x))
-        return self.fc5(x)
+        return F.softmax(self.fc5(x), dim=-1)
 
 class ReplayBuffer():
-    def __init__(self):
-        self.buffer = collections.deque(maxlen=MEMORY_SIZE)
-    def put(self, transition):
-        self.buffer.append(transition)
+    def __init__(self): self.buffer = collections.deque(maxlen=MEMORY_SIZE)
+    def put(self, transition): self.buffer.append(transition)
     def sample(self, n):
-        mini_batch = [self.buffer[i] for i in rd.choice(len(self.buffer), size=n, replace=False)]
-
         s_lst, a_lst, r_lst, s_prime_lst = [], [], [], []
-        for transition in mini_batch:
+        for transition in [self.buffer[i] for i in rd.choice(len(self.buffer), size=n, replace=False)]:
             s, a, r, s_prime = transition
             s_lst.append(s)
             a_lst.append([a])
             r_lst.append([r])
             s_prime_lst.append(s_prime)
-        return torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), \
-               torch.tensor(r_lst, dtype=torch.float), torch.tensor(s_prime_lst, dtype=torch.float)
-    def size(self):
-        return len(self.buffer)
+        return torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), torch.tensor(r_lst, dtype=torch.float), torch.tensor(s_prime_lst, dtype=torch.float)
+    def size(self): return len(self.buffer)
 
 # =====================================================================
 # 2. 기존 로직 (수정 최소화)
@@ -111,6 +105,8 @@ def decoding(process, setup, ini_set, vectors):
                 idx = len(se_setup[m]) - 1
                 interval_setup[m].append(md.new_interval_var(se_setup[m][idx][0], getattr(setup, f"{job1}{op1}{job2}{op2}"), se_setup[m][idx][1], f'{job1}{op1}_{job2}{op2}'))
                 md.add(se_setup[m][idx][1] == se_process[job2][op2][0])
+                if list(ini_set[job2]).index(op2):
+                    md.add(se_process[job2][list(ini_set[job2])[list(ini_set[job2]).index(op2) - 1]][1] <= se_setup[m][idx][0])
         md.add_no_overlap(interval_setup[m] + [interval[job][op] for job, op, _ in machines[m]])
     md.add_cumulative([l for m in interval_setup.keys() for l in interval_setup[m]], [1 for m in interval_setup.keys() for _ in interval_setup[m]], params["s_max"])
 
@@ -215,7 +211,6 @@ def knowledge_driven(process, setup, ini_set, kdp_pops, q_net, memory, epsilon):
 
     for pop in kdp_pops:
         os_vector, ms_vector = pop[0][0].copy(), pop[0][1].copy()
-        current_makespan = pop[1]
         # 1. State(상태) 형성 (OS + MS 벡터 정수화)
         state_list = get_state_vector(os_vector, ms_vector)
         state_tensor = torch.tensor(state_list, dtype=torch.float)
@@ -239,7 +234,6 @@ def knowledge_driven(process, setup, ini_set, kdp_pops, q_net, memory, epsilon):
                 vectors = reassign(ini_set, os_vector, ms_vector)
                 # print("Reassign")
             else:
-
                 if action == 3:
                     idx = rd.randint(len(os_vector))
                     chosen_job = os_vector[idx]
@@ -254,27 +248,14 @@ def knowledge_driven(process, setup, ini_set, kdp_pops, q_net, memory, epsilon):
                     # print("Multi points --> Chosen Indexes", indices)
                     points = []
                     for l in range(len(indices) - 1):
-                        if l % 2 == 0:
-                            points.extend(list(range(indices[l], indices[l + 1])))
-                    if len(indices) % 2 == 1:
-                        points.extend(list(range(indices[len(indices) - 1], len(os_vector))))
+                        if l % 2 == 0: points.extend(list(range(indices[l], indices[l + 1])))
+                    if len(indices) % 2 == 1: points.extend(list(range(indices[len(indices) - 1], len(os_vector))))
                 else: points = [] # Do not reach
                 vectors = crossover(points, os_vector, ms_vector, pair)
-            # print()
 
-            # 4. 평가 (Decoding)
             new_pop = decoding(process, setup, ini_set, vectors)
-            new_makespan = new_pop[1]
-
-            # 5. 보상 (Makespan 단축 시 +10, 아니면 0)
-            reward = 10.0 if new_makespan < current_makespan else 0.0
-
-            # 6. 다음 상태 (Next State) 및 버퍼 저장
-            next_state_list = get_state_vector(new_pop[0][0], new_pop[0][1])
-            memory.put((state_list, action, reward, next_state_list))
-
+            memory.put((state_list, action, 10.0 if new_pop[1] < pop[1] else 0.0, get_state_vector(new_pop[0][0], new_pop[0][1])))
             new_pops.append(new_pop)
-
     return new_pops
 
 def graph_makespan(ini_set, machines, best):
@@ -315,31 +296,24 @@ def cp_aea(process, setup, ini_set, machines):
     ini_os_vector = [job for job in ini_set.keys() for _ in range(len(ini_set[job]))]
     
     print("Gen 0", "="*30)
-    print("Initial Population 생성을 위해 CP 모델 해석 중...")
     pops = sorted([decoding(process, setup, ini_set, (rd.permutation(ini_os_vector).tolist(), [])) for _ in range(params["Np1"] + params["Np2"])], key=lambda case: case[1])
     print(f"Best Makespan: {pops[0][1]}")
     # 1. DQN 초기화
     state_dim = len(ini_os_vector) * 2 # OS 벡터 길이 + MS 벡터 길이
     q_net = FJSP_QNet(state_dim=state_dim, action_dim=6)
-    optimizer = optim.Adam(q_net.parameters(), lr=LR)
-    memory = ReplayBuffer()
-    epsilon = 0.5 # 초기 탐험 확률
+    optimizer, memory, epsilon = optim.Adam(q_net.parameters(), lr=LR), ReplayBuffer(), 0.5 # 초기 탐험 확률
 
     for gen in range(1, params["num_of_gens"] + 1):
         print(f"Gen {gen}", "=" * 30)
-        
-        # 2. 집단 분리: EGP(우수 절반)와 KDP(나머지 절반)
+
         egp = pops[:params["Np1"]]
         kdp = pops[:params["Np2"]]
-        
-        # 3. EGP: 진화적 메타휴리스틱으로 자식 생성
-        offsprings_egp = evolution_guided(process, setup, ini_set, egp)
-        
+
+        pops.extend(evolution_guided(process, setup, ini_set, egp))
+
         # 4. KDP: DQN 강화학습 판단으로 자식 생성 (새로 구현된 부분)
-        offsprings_kdp = knowledge_driven(process, setup, ini_set, kdp, q_net, memory, epsilon)
-        pops.extend(offsprings_egp)
-        pops.extend(offsprings_kdp)
-        # 5. 세대 통합 및 우수 개체 선별
+        pops.extend(knowledge_driven(process, setup, ini_set, kdp, q_net, memory, epsilon))
+
         pops.sort(key=lambda case: case[1])
 
         print(f"Best Makespan: {pops[0][1]}")
