@@ -302,7 +302,7 @@ def cp_aea(process, setup, ini_set, machines):
     state_dim = len(ini_os_vector) * 2 # OS 벡터 길이 + MS 벡터 길이
     (q_net, q_net_target), memory = [FJSP_QNet(state_dim=state_dim, action_dim=6) for _ in range(2)], ReplayBuffer()
     optimizer, epsilon = optim.Adam(q_net.parameters(), lr=LR), 0.5 # 초기 탐험 확률
-    q_net_target.load_state_dict(q_net_target.state_dict())
+    q_net_target.load_state_dict(q_net.state_dict())
     q_net_target.eval()
 
     for gen in range(1, params["num_of_gens"] + 1):
