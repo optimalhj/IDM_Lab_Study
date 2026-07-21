@@ -300,8 +300,9 @@ def cp_aea(process, setup, ini_set, machines):
     print(f"Best Makespan: {pops[0][1]}")
     # 1. DQN 초기화
     state_dim = len(ini_os_vector) * 2 # OS 벡터 길이 + MS 벡터 길이
-    q_net = FJSP_QNet(state_dim=state_dim, action_dim=6)
-    optimizer, memory, epsilon = optim.Adam(q_net.parameters(), lr=LR), ReplayBuffer(), 0.5 # 초기 탐험 확률
+    (q_net, q_net_target), memory = [FJSP_QNet(state_dim=state_dim, action_dim=6) for _ in range(2)], ReplayBuffer()
+    optimizer, epsilon = optim.Adam(q_net.parameters(), lr=LR), 0.5 # 초기 탐험 확률
+    q_net_target.eval()
 
     for gen in range(1, params["num_of_gens"] + 1):
         print(f"Gen {gen}", "=" * 30)
@@ -321,11 +322,11 @@ def cp_aea(process, setup, ini_set, machines):
         # 6. DQN 신경망 학습 (경험 리플레이)
         if memory.size() > BATCH_SIZE:
             s_batch, a_batch, r_batch, s_prime_batch = memory.sample(BATCH_SIZE)
-            q_out = q_net(s_batch)
-            q_a = q_out.gather(1, a_batch)
+            q_a = q_net(s_batch).gather(1, a_batch)
 
-            max_q_prime = q_net(s_prime_batch).max(1)[0].unsqueeze(1)
-            target = r_batch + GAMMA * max_q_prime
+            with torch.no_grad():
+                max_q_prime = q_net(s_prime_batch).max(1)[0].unsqueeze(1)
+                target = r_batch + GAMMA * max_q_prime
 
             loss = F.smooth_l1_loss(q_a, target)
             optimizer.zero_grad()
