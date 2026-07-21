@@ -1,6 +1,7 @@
 import numpy as np
 from numpy import random as rd
 import itertools
+from collections import deque
 
 import torch
 import torch.nn as nn
@@ -8,8 +9,6 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data
 import torch.optim as optim
-
-from collections import deque
 
 class Qnet(nn.Module):
     def __init__(self, in_dim, hidden1_dim, embed_dim, num_heads_dim, hidden2_dim, out_dim):
@@ -106,8 +105,11 @@ def decoding(process, setup, ini_set, machines, seq):
     return disjunctive_graph(seq, se_process, se_setup), max(s_m[m][0] for m in machines), se_process, se_setup
 
 def dynamic_fjsp(process, setup, ini_set, machines, params):
-    qnet, memory = Qnet(in_dim=params["in_dim"], hidden1_dim=params["hidden1_dim"], embed_dim=params["embed_dim"], num_heads_dim=params["num_heads_dim"], hidden2_dim=params["hidden2_dim"], out_dim=params["out_dim"]), Memory(params["mini_batch"])
-    optimizer = optim.Adam(qnet.parameters(), lr=params["lr"])
+    qnet, qnet_target = [Qnet(in_dim=params["in_dim"], hidden1_dim=params["hidden1_dim"], embed_dim=params["embed_dim"], num_heads_dim=params["num_heads_dim"], hidden2_dim=params["hidden2_dim"], out_dim=params["out_dim"]) for _ in range(2)]
+    optimizer, memory = optim.Adam(qnet.parameters(), lr=params["lr"]), Memory(params["mini_batch"])
+    qnet_target.load_state_dict(qnet.state_dict())
+    qnet_target.eval()
+
     ini_seq = rd.permutation([job for job in ini_set.keys() for _ in range(len(ini_set[job]))]).tolist()
     job_info = {job: 0 for job in ini_set.keys()}
     for l in range(len(ini_seq)):
