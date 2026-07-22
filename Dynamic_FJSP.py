@@ -110,7 +110,7 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
     qnet_target.load_state_dict(qnet.state_dict())
     qnet_target.eval()
 
-    ini_seq = rd.permutation([job for job in ini_set.keys() for _ in range(len(ini_set[job]))]).tolist()
+    ini_seq, entire_seq = rd.permutation([job for job in ini_set.keys() for _ in range(len(ini_set[job]))]).tolist(), []
     job_info = {job: 0 for job in ini_set.keys()}
     for l in range(len(ini_seq)):
         job = ini_seq[l]
@@ -137,9 +137,9 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
 
         t, p_0_fitness = 0, []
         while t < params["mating_pool"]:
-            cache, identifier, in_cache = [], [[(int(job.replace("Job", "")), int(op.replace("Op", "")), int(m.replace("M", ""))) for job, op, m in p_t] for p_t in p_0 if len(p_t)], False
+            cache, identifier, in_cache = [record[3] for record in memory.sample()], [p_t for p_t in p_0 if len(p_t)], False
             for identity in itertools.permutations(identifier):
-                if identity in [state[0] for state in cache]:
+                if identity in cache:
                     in_cache = (True, cache.index(identity))
                     break
 
