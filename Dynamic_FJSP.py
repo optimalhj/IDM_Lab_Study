@@ -1,6 +1,5 @@
 import numpy as np
 from numpy import random as rd
-import itertools
 from collections import deque
 
 import torch
@@ -11,8 +10,9 @@ from torch_geometric.data import Data
 import torch.optim as optim
 
 class Qnet(nn.Module):
-    def __init__(self, in_dim, hidden1_dim, embed_dim, num_heads_dim, hidden2_dim, out_dim):
+    def __init__(self, in_dim, hidden1_dim, embed_dim, num_heads_dim, hidden2_dim, out_dim, population_size):
         super(Qnet, self).__init__()
+        self.population_size = population_size
         self.layer1 = GCNConv(in_dim, hidden1_dim)
         self.layer2 = GCNConv(hidden1_dim, embed_dim)
         self.layer3 = nn.MultiheadAttention(embed_dim, num_heads_dim, batch_first=True)
@@ -21,14 +21,15 @@ class Qnet(nn.Module):
 
     def forward(self, data_tensor):
         x = self.layer1(data_tensor.x, data_tensor.edge_index)
+        x = F.relu(x)
         x = self.layer2(x, data_tensor.edge_index)
         x = x.unsqueeze(0)
-        x = self.layer3(x, x, x)[0]
+        x, _ = self.layer3(x, x, x)
         x = torch.mean(x.squeeze(0), dim=0, keepdim=True)
-        x = F.relu(self.layer4(x))
+        x = self.layer4(x)
+        x = F.relu(x)
         x = self.layer5(x)
-        x = F.softmax(x, dim=-1)
-        return x
+        return torch.cat([torch.distributions.Categorical(F.softmax(x, dim=-1)).sample() for _ in range(self.population_size)], dim=0)
 
 class Memory:
     def __init__(self, mini_batch):
@@ -57,12 +58,12 @@ def disjunctive_graph(seq, se_process, se_setup): # seq to disjunctive_graph
         if m not in m_info: m_info[m] = []
         m_info[m].append(l)
         st_setup_tensor, ed_setup_tensor = se_process[job][op][0], se_process[job][op][0]
-        for st_setup, ed_setup, _, _, job_tmp, op_tmp in se_setup[m]:
-            if job == job_tmp and op == op_tmp:
-                st_setup_tensor, ed_setup_tensor = st_setup, ed_setup
-                break
+        if m in se_setup:
+            for st_setup, ed_setup, _, _, job_tmp, op_tmp in se_setup[m]:
+                if job == job_tmp and op == op_tmp:
+                    st_setup_tensor, ed_setup_tensor = st_setup, ed_setup
+                    break
         n_tensor.append((int(job.replace("Job", "")), int(op.replace("Op", "")), int(m.replace("M", "")), se_process[job][op][0], se_process[job][op][1], st_setup_tensor, ed_setup_tensor))
-
     conjunctive_arcs, disjunctive_arcs = [], []
     for job in job_info.keys():
         for l in range(len(job_info[job]) - 1): conjunctive_arcs.append((job_info[job][l], job_info[job][l + 1]))
@@ -74,23 +75,25 @@ def disjunctive_graph(seq, se_process, se_setup): # seq to disjunctive_graph
     ve_tensor.extend(disjunctive_arcs)
 
     return Data(torch.tensor(n_tensor, dtype=torch.float), torch.tensor(ve_tensor, dtype=torch.long).t().contiguous())
-def correct_seq(): # disjunctive_graph to seq
-    return 0
+def correct_seq(x_tensor): # disjunctive_graph to seq
+    seq = []
+    for job, op, m, _, _, _, _ in x_tensor:
+        job, op, m = f"Job{int(job)}", f"Op{int(op)}", f"M{int(m)}"
+        seq.append((job, op, m))
+    return seq
 def encoding(): # seq to disjunctive_graph
     return
-def decoding(process, setup, ini_set, machines, seq):
+def decoding(process, setup, machines, seq):
     s_job, se_process, s_m, se_setup = {}, {}, {}, {}
-    for job in ini_set.keys():
-        s_job[job] = 0
-        se_process[job] = {}
-        for op in ini_set[job].keys():
-            se_process[job][op] = [0, 0]
-    for m in machines:
-        s_m[m] = [0, ()]
-        se_setup[m] = []
+    total_process_time = 0
 
     for l in range(len(seq)):
         job, op, m = seq[l]
+
+        if job not in s_job: s_job[job], se_process[job] = 0, {}
+        se_process[job][op] = [0, 0, m]
+        if m not in s_m: s_m[m], se_setup[m] = [0, ()], []
+
         now = max(s_job[job], s_m[m][0])
         if len(s_m[m][1]):
             setup_time = getattr(setup, f"{s_m[m][1][0]}{s_m[m][1][1]}{job}{op}")
@@ -98,87 +101,143 @@ def decoding(process, setup, ini_set, machines, seq):
                 now += setup_time
                 se_setup[m].append((now - setup_time, now, s_m[m][1][0], s_m[m][1][1], job, op))
         se_process[job][op][0] += now
-        now += getattr(process, f"{job}{op}{m}")
+        process_time = getattr(process, f"{job}{op}{m}")
+        total_process_time += process_time
+        now += process_time
         se_process[job][op][1] += now
         s_job[job], s_m[m] = now, [now, (job, op)]
+    c_max = max(s_m[m][0] for m in s_m.keys())
+    reward = total_process_time / len(machines) / c_max
+    se_setup = {m: se_setup[m] for m in se_setup.keys() if len(se_setup[m])}
 
-    return disjunctive_graph(seq, se_process, se_setup), max(s_m[m][0] for m in machines), se_process, se_setup
+    return disjunctive_graph(seq, se_process, se_setup), reward, c_max, se_process, se_setup
+
+def sequence_rule(process, ini_set, action, seq):
+    if action in (0, 1, 4, 5):
+        new_seq, job_info = [], {}
+        for job, op, m in seq:
+            if job not in job_info: job_info[job] = sum(getattr(process, f"{job}{op_tmp}{min(ini_set[job][op_tmp], key=lambda cand_m: getattr(process, f"{job}{op_tmp}{cand_m}"))}") for op_tmp in list(ini_set[job])[list(ini_set[job]).index(op):]) if action in (0, 1) else len(ini_set[job]) - list(ini_set[job]).index(op)
+        choose_job = sorted(list(job_info), key=lambda cand_job: job_info[cand_job], reverse=True if action % 2 else False)
+
+        for job in choose_job:
+            for sche in seq:
+                if sche[0] == job:
+                    new_seq.append(sche)
+                    break
+
+    elif action in (2, 3): new_seq = sorted(seq, key=lambda sche: getattr(process, f"{sche[0]}{sche[1]}{sche[2]}"), reverse=True if action % 2 else False)
+    else: new_seq = rd.permutation(seq).tolist()
+    return new_seq
+
+def single_crossover(p1, p2):
+    (p1, p2) = [correct_seq(p) for p in (p1, p2)]
+    indices = list(range(rd.choice(len(p1))))
+
+    off1, off2 = [p1[idx] for idx in indices], [p2[idx] for idx in indices]
+    for l in range(len(p1)):
+        sche1, sche2 = p1[l], p2[l]
+        if sche2 not in off1: off1.append(sche2)
+        if sche1 not in off2: off2.append(sche1)
+    return off1, off2
 
 def dynamic_fjsp(process, setup, ini_set, machines, params):
-    qnet, qnet_target = [Qnet(in_dim=params["in_dim"], hidden1_dim=params["hidden1_dim"], embed_dim=params["embed_dim"], num_heads_dim=params["num_heads_dim"], hidden2_dim=params["hidden2_dim"], out_dim=params["out_dim"]) for _ in range(2)]
-    optimizer, memory = optim.Adam(qnet.parameters(), lr=params["lr"]), Memory(params["mini_batch"])
+    qnet, qnet_target = [Qnet(in_dim=params["in_dim"], hidden1_dim=params["hidden1_dim"], embed_dim=params["embed_dim"], num_heads_dim=params["num_heads_dim"], hidden2_dim=params["hidden2_dim"], out_dim=params["out_dim"], population_size=params["pop_size"]) for _ in range(2)]
+    optimizer, memory, cache = optim.Adam(qnet.parameters(), lr=params["lr"]), Memory(params["mini_batch"]), []
     qnet_target.load_state_dict(qnet.state_dict())
     qnet_target.eval()
 
-    ini_seq, entire_seq = rd.permutation([job for job in ini_set.keys() for _ in range(len(ini_set[job]))]).tolist(), []
+    ini_seq = rd.permutation([job for job in ini_set.keys() for _ in range(len(ini_set[job]))]).tolist()
     job_info = {job: 0 for job in ini_set.keys()}
     for l in range(len(ini_seq)):
         job = ini_seq[l]
         op = list(ini_set[job])[job_info[job]]
-        ini_seq[l] = (job, op, str(rd.choice(list(ini_set[job][op]))))
+        ini_seq[l] = (job, op, str(rd.choice(ini_set[job][op])))
         job_info[job] += 1
 
+    idle_machine, candidate_operation = machines.copy(), [(job, list(ini_set[job])[0]) for job in ini_set.keys()]
+    gamma, p_0, q_results = params["gamma"], [], qnet(decoding(process, setup, machines, ini_seq)[0])  #.argmax().item()
+    for _ in range(params["pop_size"]):
+        individual = []
+        for l in range(len(candidate_operation)):
+            job, op = candidate_operation[l]
+            candidate_operation_m = []
+            for m in ini_set[job][op]:
+                if m in idle_machine: candidate_operation_m.append(m)
+            if len(candidate_operation): individual.append((job, op, min(candidate_operation_m, key=lambda cand_m:getattr(process, f"{job}{op}{cand_m}")))) # SPTM Rule Applied
+        p_0.append(individual)
+
     for i in range(params["epoch"]):
-        data_tensor, _, _, _ = decoding(process, setup, ini_set, machines, ini_seq)
-        q_result = qnet(data_tensor).argmax().item()
+        p_0 = [decoding(process, setup, machines, p_t) for p_t in (sequence_rule(process, ini_set, action, p_t) for action, p_t in zip(q_results, p_0))]
 
-        p_0, idle_machine, candidate_operation = [], machines.copy(), [(job, list(ini_set[job])[0]) for job in ini_set.keys()]
-        q_m, t = {m: [sche for sche in candidate_operation if m in ini_set[sche[0]][sche[1]]] for m in machines}, 0
-        while t < params["pop_size"]:
-            x = []
-            for m in idle_machine:
-                if len(q_m[m]):
-                    job, op = q_m[m][rd.choice(len(q_m[m]))]
-                    x.append((job, op, m))
-                    for m_tmp in q_m:
-                        if (job, op) in q_m[m_tmp]: q_m[m_tmp].remove((job, op))
-            p_0.append(x)
-            t += 1
+        samples, in_cache = memory.sample(), -1
+        for p_t in p_0:
+            if p_t[0] in [state for state, _ in cache]:
+                in_cache = cache.index(p_t[0])
 
-        t, p_0_fitness = 0, []
-        while t < params["mating_pool"]:
-            cache, identifier, in_cache = [record[3] for record in memory.sample()], [p_t for p_t in p_0 if len(p_t)], False
-            for identity in itertools.permutations(identifier):
-                if identity in cache:
-                    in_cache = (True, cache.index(identity))
-                    break
+        if in_cache >= 0:
+            v = cache[in_cache][1]
+            v_stars = [v for _ in range(len(p_0))]
+        else:
+            v_best, v_stars = 0, []
+            for p_t in p_0:
+                p_t, reward, c_max = p_t[:3]
+                v = reward + gamma / c_max
+                if v > v_best:
+                    v_best = v
+                v_stars.append(v)
+            cache.append((p_0[v_stars.index(v_best)][0], v_best))
 
-            if in_cache:
-                v_best = cache[in_cache[1]][1]
-                for p_t in p_0:
-                    if len(p_t):
-                        p_0_fitness.append((p_t, v_best))
+        offs, break_count, v_stars_off = [], 0, []
+        while len(offs) < len(p_0):
+            p1, p2, prior_len = 0, 0, len(offs)
+            print(break_count, len(offs))
+            while p_0[p1] == p_0[p2]:
+                if len(p_0) == 1: break
+                p1, p2 = rd.choice(len(p_0), size=2, replace=False)
+            if rd.random() < params["crossover"]:
+                o1, o2 = single_crossover(p_0[p1][0].x, p_0[p2][0].x)
+                if o1 not in offs: offs.append(o1)
+                if o2 not in offs: offs.append(o2)
             else:
-                v_best = 0
-                gamma_tmp = rd.random()
-                for p_t in p_0:
-                    if len(p_t):
-                        p_t, c_max, _, _ = decoding(process, setup, ini_set, machines, p_t)
-                        v = 0 + gamma_tmp / c_max
-                        if v > v_best:
-                            v_best = v
-                        p_0_fitness.append((p_t, v))
-                if t == params["gens"] - 1:
-                    cache.append((identifier, v_best))
-        fitness_individual = sorted(p_0_fitness, key=lambda indi: indi[1], reverse=True)
-        print(fitness_individual)
+                p1, p2 = correct_seq(p_0[p1][0].x), correct_seq(p_0[p2][0].x)
+                if p1 not in offs: offs.append(p1)
+                if p2 not in offs: offs.append(p2)
+            if not len(offs) - prior_len:
+                break_count += 1
+                if break_count == 10: break
+            else: break_count = 0
 
+        for k in range(len(offs)):
+            off = offs[k]
+            if rd.random() < params["mutation"]:
+                job, op, m_origin = off[rd.choice(len(off))]
+                alternative_m = [m for m in idle_machine if m != m_origin]
+                if not len(alternative_m):
+                    offs[i] = (job, op, str(rd.choice(alternative_m)))
+            x_t, reward, c_max = decoding(process, setup, machines, off)[:3]
+            v = reward + gamma / c_max
+            v_stars_off.append(v)
+        g_t = [p_t for p_t in zip(p_0, v_stars)]
+        for off in zip(offs, v_stars_off):
+            if off not in g_t:
+                g_t.append(off)
+        g_t = sorted(g_t, key=lambda x: x[1], reverse=True)[:params["pop_size"]]
 
-
-        if len(memory.memory) > params["batch_size"]:
-            s_batch, a_batch, r_batch, s_prime_batch = memory.sample()
-            q_out = qnet(s_batch)
-            q_a = q_out.gather(1, a_batch)
-
-            max_q_prime = qnet(s_prime_batch).max(1)[0].unsqueeze(1)
-            target = r_batch + params["gamma"] * max_q_prime
-
-            loss = F.smooth_l1_loss(q_a, target)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-        # print(q_result)
-        return
+        # if len(memory.memory) > params["batch_size"]:
+        #     s_batch, a_batch, r_batch, s_prime_batch = memory.sample()
+        #     q_out = qnet(s_batch)
+        #     q_a = q_out.gather(1, a_batch)
+        #
+        #     max_q_prime = qnet(s_prime_batch).max(1)[0].unsqueeze(1)
+        #     target = r_batch + params["gamma"] * max_q_prime
+        #
+        #     loss = F.smooth_l1_loss(q_a, target)
+        #     optimizer.zero_grad()
+        #     loss.backward()
+        #     optimizer.step()
+        # # print(q_result)
+        # return
+        break
 
 class Process:
     def __init__(self): pass
@@ -205,7 +264,7 @@ def start(processes, setups, machines_tmp, params):
 
 def main():
     num_job, max_num_op, num_machines, max_time = 4, 4, 3, 8
-    params = {"pop_size": 10, "mating_pool": 10, "gens": 1, "epoch": 20,
+    params = {"pop_size": 10, "mating_pool": 10, "gens": 1, "epoch": 20, "crossover": 0.8, "mutation": 0.1,
               "in_dim": 7, "hidden1_dim":16, "embed_dim":8, "num_heads_dim":8, "hidden2_dim":32, "out_dim":7,
               "max_len": 100, "batch_size": 50, "mini_batch": 30, "lr": 0.05, "gamma": 0.05}
 
