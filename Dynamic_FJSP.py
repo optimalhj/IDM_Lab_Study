@@ -81,9 +81,9 @@ def correct_seq(x_tensor): # disjunctive_graph to seq
         job, op, m = f"Job{int(job)}", f"Op{int(op)}", f"M{int(m)}"
         seq.append((job, op, m))
     return seq
-def encoding(): # seq to disjunctive_graph
-    return
-def decoding(process, setup, machines, seq):
+def decoding(process, setup, machines, seq, decision_point=None):
+    if decision_point is None: decision_point = {}
+    print("******", decision_point)
     s_job, se_process, s_m, se_setup = {}, {}, {}, {}
     total_process_time = 0
 
@@ -91,8 +91,16 @@ def decoding(process, setup, machines, seq):
         job, op, m = seq[l]
 
         if job not in s_job: s_job[job], se_process[job] = 0, {}
-        se_process[job][op] = [0, 0, m]
+        se_process[job][op] = [0, 0]
         if m not in s_m: s_m[m], se_setup[m] = [0, ()], []
+
+        if len(decision_point) and (job, op) in decision_point[m][1]:
+            remaining_time = decision_point[m][0]
+            s_job[job] += remaining_time
+            se_process[job][op][1] += remaining_time
+            s_m[m][0] += remaining_time
+            s_m[m][1] = (job, op)
+            continue
 
         now = max(s_job[job], s_m[m][0])
         if len(s_m[m][1]):
@@ -146,7 +154,8 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
     qnet_target.load_state_dict(qnet.state_dict())
     qnet_target.eval()
 
-    ini_seq = rd.permutation([job for job in ini_set.keys() for _ in range(len(ini_set[job]))]).tolist()
+    did_bool = {job: {op: False for op in ini_set[job].keys()} for job in ini_set.keys()}
+    ini_seq, entire_seq = rd.permutation([job for job in ini_set.keys() for _ in range(len(ini_set[job]))]).tolist(), []
     job_info = {job: 0 for job in ini_set.keys()}
     for l in range(len(ini_seq)):
         job = ini_seq[l]
@@ -154,75 +163,105 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
         ini_seq[l] = (job, op, str(rd.choice(ini_set[job][op])))
         job_info[job] += 1
 
-    idle_machine, candidate_operation = machines.copy(), [(job, list(ini_set[job])[0]) for job in ini_set.keys()]
-    gamma, p_0, q_results = params["gamma"], [], qnet(decoding(process, setup, machines, ini_seq)[0])  #.argmax().item()
-    for _ in range(params["pop_size"]):
-        individual = []
-        for l in range(len(candidate_operation)):
-            job, op = candidate_operation[l]
-            candidate_operation_m = []
-            for m in ini_set[job][op]:
-                if m in idle_machine: candidate_operation_m.append(m)
-            if len(candidate_operation): individual.append((job, op, min(candidate_operation_m, key=lambda cand_m:getattr(process, f"{job}{op}{cand_m}")))) # SPTM Rule Applied
-        p_0.append(individual)
+    idle_machine, candidate_operation, decision_point_issue = machines.copy(), [(job, list(ini_set[job])[0]) for job in ini_set.keys()], {}
+    gamma, q_results = params["gamma"], qnet(decoding(process, setup, machines, ini_seq)[0])  #.argmax().item()
+    while len(entire_seq) < len(ini_seq):
+        p_0 = []
 
-    for i in range(params["epoch"]):
-        p_0 = [decoding(process, setup, machines, p_t) for p_t in (sequence_rule(process, ini_set, action, p_t) for action, p_t in zip(q_results, p_0))]
+        for _ in range(params["pop_size"]):
+            individual = []
+            for l in range(len(candidate_operation)):
+                job, op = candidate_operation[l]
+                candidate_operation_m = []
+                for m in ini_set[job][op]:
+                    if m in idle_machine: candidate_operation_m.append(m)
+                if len(candidate_operation): individual.append((job, op, min(candidate_operation_m, key=lambda cand_m:getattr(process, f"{job}{op}{cand_m}")))) # SPTM Rule Applied
+            p_0.append(individual)
+        p_0 = [decoding(process, setup, machines, p_t, decision_point_issue) for p_t in (sequence_rule(process, ini_set, action, p_t) for action, p_t in zip(q_results, p_0))]
 
-        samples, in_cache = memory.sample(), -1
-        for p_t in p_0:
-            if p_t[0] in [state for state, _ in cache]:
-                in_cache = cache.index(p_t[0])
+        for i in range(params["epoch"]):
 
-        if in_cache >= 0:
-            v = cache[in_cache][1]
-            v_stars = [v for _ in range(len(p_0))]
-        else:
-            v_best, v_stars = 0, []
+            in_cache = -1
             for p_t in p_0:
-                p_t, reward, c_max = p_t[:3]
-                v = reward + gamma / c_max
-                if v > v_best:
-                    v_best = v
-                v_stars.append(v)
-            cache.append((p_0[v_stars.index(v_best)][0], v_best))
+                cache_tmp = [state for state, _ in cache]
+                if p_t[0] in cache_tmp:
+                    in_cache = cache_tmp.index(p_t[0])
 
-        offs, break_count, v_stars_off = [], 0, []
-        while len(offs) < len(p_0):
-            p1, p2, prior_len = 0, 0, len(offs)
-            print(break_count, len(offs))
-            while p_0[p1] == p_0[p2]:
-                if len(p_0) == 1: break
-                p1, p2 = rd.choice(len(p_0), size=2, replace=False)
-            if rd.random() < params["crossover"]:
-                o1, o2 = single_crossover(p_0[p1][0].x, p_0[p2][0].x)
-                if o1 not in offs: offs.append(o1)
-                if o2 not in offs: offs.append(o2)
+            if in_cache >= 0:
+                v = cache[in_cache][1]
+                v_stars = [v for _ in range(len(p_0))]
             else:
-                p1, p2 = correct_seq(p_0[p1][0].x), correct_seq(p_0[p2][0].x)
-                if p1 not in offs: offs.append(p1)
-                if p2 not in offs: offs.append(p2)
-            if not len(offs) - prior_len:
-                break_count += 1
-                if break_count == 10: break
-            else: break_count = 0
+                v_best, v_stars = 0, []
+                for p_t in p_0:
+                    p_t, reward, c_max = p_t[:3]
+                    v = reward + gamma / c_max
+                    if v > v_best:
+                        v_best = v
+                    v_stars.append(v)
+                cache.append((p_0[v_stars.index(v_best)][0], v_best))
 
-        for k in range(len(offs)):
-            off = offs[k]
-            if rd.random() < params["mutation"]:
-                job, op, m_origin = off[rd.choice(len(off))]
-                alternative_m = [m for m in idle_machine if m != m_origin]
-                if not len(alternative_m):
-                    offs[i] = (job, op, str(rd.choice(alternative_m)))
-            x_t, reward, c_max = decoding(process, setup, machines, off)[:3]
-            v = reward + gamma / c_max
-            v_stars_off.append(v)
-        g_t = [p_t for p_t in zip(p_0, v_stars)]
-        for off in zip(offs, v_stars_off):
-            if off not in g_t:
-                g_t.append(off)
-        g_t = sorted(g_t, key=lambda x: x[1], reverse=True)[:params["pop_size"]]
+            offs, break_count, v_stars_off = [], 0, []
+            while len(offs) < len(p_0):
+                p1, p2, prior_len = 0, 0, len(offs)
+                while p_0[p1] == p_0[p2]:
+                    if len(p_0) == 1: break
+                    p1, p2 = rd.choice(len(p_0), size=2, replace=False)
+                if rd.random() < params["crossover"]:
+                    o1, o2 = single_crossover(p_0[p1][0].x, p_0[p2][0].x)
+                    if o1 not in offs: offs.append(o1)
+                    if o2 not in offs: offs.append(o2)
+                else:
+                    p1, p2 = correct_seq(p_0[p1][0].x), correct_seq(p_0[p2][0].x)
+                    if p1 not in offs: offs.append(p1)
+                    if p2 not in offs: offs.append(p2)
+                if not len(offs) - prior_len:
+                    break_count += 1
+                    if break_count == 10: break
+                else: break_count = 0
 
+            for k in range(len(offs)):
+                off = offs[k]
+                if rd.random() < params["mutation"]:
+                    job, op, m_origin = off[rd.choice(len(off))]
+                    alternative_m = [m for m in idle_machine if m != m_origin]
+                    if not len(alternative_m):
+                        offs[i] = (job, op, str(rd.choice(alternative_m)))
+                decode_result = decoding(process, setup, machines, off, decision_point_issue)
+                x_t, reward, c_max = decode_result[:3]
+                offs[k] = (decode_result, reward + gamma / c_max)
+            g_0 = [(p_0[i], v_stars[i]) for i in range(len(p_0))]
+
+            state_tmp_list = [state_tmp.x for (state_tmp, _, _, _, _), _ in g_0]
+            for off in offs:
+                done = True
+                for state_tmp in state_tmp_list:
+                    if torch.all(off[0][0].x == state_tmp).tolist():
+                        done = False
+                        break
+                if done: g_0.append(off)
+
+            p_0 = [g_t[0] for g_t in sorted(g_0, key=lambda x: x[1], reverse=True)[:params["pop_size"]]]
+        winner_data, _, _, winner_se_process, winner_se_setup = p_0[0]
+        addition, decision_point_issue, decision_point = correct_seq(winner_data.x), {m: [0, ()] for m in machines}, min(winner_se_process[job][op][1] for job in winner_se_process.keys() for op in winner_se_process[job])
+        candidate_operation = []
+        for job, op, m in addition:
+            decision_point_issue[m] = [winner_se_process[job][op][1] - decision_point, (job, op)]
+            if decision_point_issue[m][0] <= 0:
+                did_bool[job][op] = True
+        for job in did_bool.keys():
+            for op in did_bool[job].keys():
+                if not did_bool[job][op]:
+                    candidate_operation.append((job, op))
+                    break
+        entire_seq.extend(addition)
+        idle_machine = [m for m in decision_point_issue if not decision_point_issue[m][0]]
+
+        print(winner_se_process)
+        print(decision_point_issue)
+        print(idle_machine)
+        print(candidate_operation)
+    return entire_seq
+        # entire_seq.extend(p_0)
         # if len(memory.memory) > params["batch_size"]:
         #     s_batch, a_batch, r_batch, s_prime_batch = memory.sample()
         #     q_out = qnet(s_batch)
@@ -237,7 +276,7 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
         #     optimizer.step()
         # # print(q_result)
         # return
-        break
+
 
 class Process:
     def __init__(self): pass
@@ -263,8 +302,8 @@ def start(processes, setups, machines_tmp, params):
     dynamic_fjsp(process, setup, ini_set, machines, params)
 
 def main():
-    num_job, max_num_op, num_machines, max_time = 4, 4, 3, 8
-    params = {"pop_size": 10, "mating_pool": 10, "gens": 1, "epoch": 20, "crossover": 0.8, "mutation": 0.1,
+    num_job, max_num_op, num_machines, max_time = 3, 4, 3, 8
+    params = {"pop_size": 10, "mating_pool": 10, "gens": 1, "epoch": 1, "crossover": 0.8, "mutation": 0.1,
               "in_dim": 7, "hidden1_dim":16, "embed_dim":8, "num_heads_dim":8, "hidden2_dim":32, "out_dim":7,
               "max_len": 100, "batch_size": 50, "mini_batch": 30, "lr": 0.05, "gamma": 0.05}
 
