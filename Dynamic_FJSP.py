@@ -1,4 +1,3 @@
-import numpy as np
 from numpy import random as rd
 from collections import deque
 
@@ -35,8 +34,8 @@ class Memory:
     def __init__(self, mini_batch):
         self.memory = deque(maxlen=100)
         self.mini_batch = mini_batch
-    def add_buffer(self, history):
-        self.memory.append(history)
+    def add_buffer(self, buffer):
+        self.memory.append(buffer)
 
     def sample(self):
         s_lst, a_lst, r_lst, s_prime_lst = [], [], [], []
@@ -83,24 +82,19 @@ def correct_seq(x_tensor): # disjunctive_graph to seq
     return seq
 def decoding(process, setup, machines, seq, decision_point=None):
     if decision_point is None: decision_point = {}
-    print("******", decision_point)
     s_job, se_process, s_m, se_setup = {}, {}, {}, {}
     total_process_time = 0
+
+    for m in decision_point.keys():
+        remain, (job_tmp, op_tmp) = decision_point[m]
+        if m not in s_m: s_m[m], se_setup[m] = [remain, (job_tmp, op_tmp)], []
 
     for l in range(len(seq)):
         job, op, m = seq[l]
 
         if job not in s_job: s_job[job], se_process[job] = 0, {}
-        se_process[job][op] = [0, 0]
+        se_process[job][op] = [0, 0, m]
         if m not in s_m: s_m[m], se_setup[m] = [0, ()], []
-
-        if len(decision_point) and (job, op) in decision_point[m][1]:
-            remaining_time = decision_point[m][0]
-            s_job[job] += remaining_time
-            se_process[job][op][1] += remaining_time
-            s_m[m][0] += remaining_time
-            s_m[m][1] = (job, op)
-            continue
 
         now = max(s_job[job], s_m[m][0])
         if len(s_m[m][1]):
@@ -154,7 +148,6 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
     qnet_target.load_state_dict(qnet.state_dict())
     qnet_target.eval()
 
-    did_bool = {job: {op: False for op in ini_set[job].keys()} for job in ini_set.keys()}
     ini_seq, entire_seq = rd.permutation([job for job in ini_set.keys() for _ in range(len(ini_set[job]))]).tolist(), []
     job_info = {job: 0 for job in ini_set.keys()}
     for l in range(len(ini_seq)):
@@ -164,10 +157,9 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
         job_info[job] += 1
 
     idle_machine, candidate_operation, decision_point_issue = machines.copy(), [(job, list(ini_set[job])[0]) for job in ini_set.keys()], {}
-    gamma, q_results = params["gamma"], qnet(decoding(process, setup, machines, ini_seq)[0])  #.argmax().item()
+    gamma = params["gamma"]
     while len(entire_seq) < len(ini_seq):
         p_0 = []
-
         for _ in range(params["pop_size"]):
             individual = []
             for l in range(len(candidate_operation)):
@@ -175,8 +167,10 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
                 candidate_operation_m = []
                 for m in ini_set[job][op]:
                     if m in idle_machine: candidate_operation_m.append(m)
-                if len(candidate_operation): individual.append((job, op, min(candidate_operation_m, key=lambda cand_m:getattr(process, f"{job}{op}{cand_m}")))) # SPTM Rule Applied
+                if len(candidate_operation_m):
+                    individual.append((job, op, min(candidate_operation_m, key=lambda cand_m:getattr(process, f"{job}{op}{cand_m}")))) # SPTM Rule Applied
             p_0.append(individual)
+        s, q_results = decoding(process, setup, machines, p_0[0], decision_point_issue)[0], qnet(decoding(process, setup, machines, ini_seq)[0])  #.argmax().item()
         p_0 = [decoding(process, setup, machines, p_t, decision_point_issue) for p_t in (sequence_rule(process, ini_set, action, p_t) for action, p_t in zip(q_results, p_0))]
 
         for i in range(params["epoch"]):
@@ -193,12 +187,27 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
             else:
                 v_best, v_stars = 0, []
                 for p_t in p_0:
-                    p_t, reward, c_max = p_t[:3]
+                    p_t, reward, c_max = p_t[:3]   # p_t, reward, c_max0 = p_t[:3] <-- Tarry's code lol
                     v = reward + gamma / c_max
                     if v > v_best:
                         v_best = v
                     v_stars.append(v)
                 cache.append((p_0[v_stars.index(v_best)][0], v_best))
+
+            for j in range(len(p_0)):
+                memory.add_buffer(buffer=[s, q_results[j], v_stars[j], p_0[j]])
+            if len(memory.memory) > params["batch_size"]:
+                s_batch, a_batch, r_batch, s_prime_batch = memory.sample()
+                q_out = qnet(s_batch)
+                q_a = q_out.gather(1, a_batch)
+
+                max_q_prime = qnet(s_prime_batch).max(1)[0].unsqueeze(1)
+                target = r_batch + gamma * max_q_prime
+
+                loss = F.smooth_l1_loss(q_a, target)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
             offs, break_count, v_stars_off = [], 0, []
             while len(offs) < len(p_0):
@@ -206,7 +215,7 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
                 while p_0[p1] == p_0[p2]:
                     if len(p_0) == 1: break
                     p1, p2 = rd.choice(len(p_0), size=2, replace=False)
-                if rd.random() < params["crossover"]:
+                if len(p_0[p1][0].x) >= 2 and rd.random() < params["crossover"]:
                     o1, o2 = single_crossover(p_0[p1][0].x, p_0[p2][0].x)
                     if o1 not in offs: offs.append(o1)
                     if o2 not in offs: offs.append(o2)
@@ -221,7 +230,7 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
 
             for k in range(len(offs)):
                 off = offs[k]
-                if rd.random() < params["mutation"]:
+                if len(off) and rd.random() < params["mutation"]:
                     job, op, m_origin = off[rd.choice(len(off))]
                     alternative_m = [m for m in idle_machine if m != m_origin]
                     if not len(alternative_m):
@@ -242,41 +251,34 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
 
             p_0 = [g_t[0] for g_t in sorted(g_0, key=lambda x: x[1], reverse=True)[:params["pop_size"]]]
         winner_data, _, _, winner_se_process, winner_se_setup = p_0[0]
-        addition, decision_point_issue, decision_point = correct_seq(winner_data.x), {m: [0, ()] for m in machines}, min(winner_se_process[job][op][1] for job in winner_se_process.keys() for op in winner_se_process[job])
-        candidate_operation = []
-        for job, op, m in addition:
-            decision_point_issue[m] = [winner_se_process[job][op][1] - decision_point, (job, op)]
-            if decision_point_issue[m][0] <= 0:
-                did_bool[job][op] = True
-        for job in did_bool.keys():
-            for op in did_bool[job].keys():
-                if not did_bool[job][op]:
-                    candidate_operation.append((job, op))
-                    break
+        addition = correct_seq(winner_data.x)
         entire_seq.extend(addition)
-        idle_machine = [m for m in decision_point_issue if not decision_point_issue[m][0]]
+        for job in winner_se_process.keys():
+            for op in winner_se_process[job].keys():
+                m = winner_se_process[job][op][2]
+                if m in decision_point_issue:
+                    if decision_point_issue[m][0] < winner_se_process[job][op][1]: decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
+                else: decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
+        decision_point = min(decision_point_issue[m][0] for m in decision_point_issue.keys() if decision_point_issue[m][0])
 
-        print(winner_se_process)
-        print(decision_point_issue)
-        print(idle_machine)
-        print(candidate_operation)
+        for m in decision_point_issue.keys():
+            decision_point_issue[m][0] = max(decision_point_issue[m][0] - decision_point, 0)
+        idle_machine = [m for m in machines if m not in decision_point_issue or not decision_point_issue[m][0]]
+        candidate_operation, entire_seq_tmp = [], [(job_tmp, op_tmp) for job_tmp, op_tmp, _ in entire_seq]
+
+        for job in ini_set.keys():
+            for op in ini_set[job].keys():
+                if op != list(ini_set[job])[-1]:
+                    next_op = list(ini_set[job])[list(ini_set[job]).index(op) + 1]
+                    if (job, op) in entire_seq_tmp and (job, next_op) not in entire_seq_tmp:
+                        for job_tmp, op_tmp, m in entire_seq:
+                            if job_tmp == job and op_tmp == op:
+                                if decision_point_issue[m][1] != (job, op): candidate_operation.append((job, next_op))
+                                else:
+                                    if decision_point_issue[m][0] == 0: candidate_operation.append((job, next_op))
+                                break
+                        break
     return entire_seq
-        # entire_seq.extend(p_0)
-        # if len(memory.memory) > params["batch_size"]:
-        #     s_batch, a_batch, r_batch, s_prime_batch = memory.sample()
-        #     q_out = qnet(s_batch)
-        #     q_a = q_out.gather(1, a_batch)
-        #
-        #     max_q_prime = qnet(s_prime_batch).max(1)[0].unsqueeze(1)
-        #     target = r_batch + params["gamma"] * max_q_prime
-        #
-        #     loss = F.smooth_l1_loss(q_a, target)
-        #     optimizer.zero_grad()
-        #     loss.backward()
-        #     optimizer.step()
-        # # print(q_result)
-        # return
-
 
 class Process:
     def __init__(self): pass
@@ -299,7 +301,8 @@ def start(processes, setups, machines_tmp, params):
     for job1, op1 in setups:
         for job2, op2 in setups:
             setattr(setup, f"{job1}{op1}{job2}{op2}", setups[(job1, op1)][(job2, op2)])
-    dynamic_fjsp(process, setup, ini_set, machines, params)
+    print()
+    print(dynamic_fjsp(process, setup, ini_set, machines, params))
 
 def main():
     num_job, max_num_op, num_machines, max_time = 3, 4, 3, 8
