@@ -86,9 +86,14 @@ def decoding(process, setup, machines, seq, decision_point=None):
     total_process_time = 0
 
     for m in decision_point.keys():
-        remain, (job_tmp, op_tmp) = decision_point[m]
-        if m not in s_m: s_m[m], se_setup[m] = [remain, (job_tmp, op_tmp)], []
-
+        if decision_point[m][-1] != "setup":
+            remain, (job_tmp, op_tmp) = decision_point[m]
+            if job_tmp not in s_job: s_job[job_tmp], se_process[job_tmp] = remain, {}
+            se_process[job_tmp][op_tmp] = [0, remain, m]
+            if m not in s_m: s_m[m], se_setup[m] = [remain, (job_tmp, op_tmp)], []
+        else:
+            remain_setup, (prior_job, prior_op, now_job, now_op), _ = decision_point[m]
+            if m not in s_m: s_m[m], se_setup[m] = [remain_setup, (now_job, now_op)], [(0, remain_setup, prior_job, prior_op, now_job, now_op)]
     for l in range(len(seq)):
         job, op, m = seq[l]
 
@@ -98,7 +103,7 @@ def decoding(process, setup, machines, seq, decision_point=None):
 
         now = max(s_job[job], s_m[m][0])
         if len(s_m[m][1]):
-            setup_time = getattr(setup, f"{s_m[m][1][0]}{s_m[m][1][1]}{job}{op}")
+            setup_time = s_m[m][0] if s_m[m][1] == (job, op) else getattr(setup, f"{s_m[m][1][0]}{s_m[m][1][1]}{job}{op}") + 2
             if setup_time:
                 now += setup_time
                 se_setup[m].append((now - setup_time, now, s_m[m][1][0], s_m[m][1][1], job, op))
@@ -111,7 +116,6 @@ def decoding(process, setup, machines, seq, decision_point=None):
     c_max = max(s_m[m][0] for m in s_m.keys())
     reward = total_process_time / len(machines) / c_max
     se_setup = {m: se_setup[m] for m in se_setup.keys() if len(se_setup[m])}
-
     return disjunctive_graph(seq, se_process, se_setup), reward, c_max, se_process, se_setup
 
 def sequence_rule(process, ini_set, action, seq):
@@ -158,7 +162,7 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
         job_info[job] += 1
 
     idle_machine, candidate_operation, decision_point_issue = machines.copy(), [(job, list(ini_set[job])[0]) for job in ini_set.keys()], {}
-    gamma = params["gamma"]
+
     while len(entire_seq) < len(ini_seq_tmp):
         p_0 = []
         for _ in range(params["pop_size"]):
@@ -191,7 +195,7 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
                     v_best, v_stars = 0, []
                     for p_t in p_0:
                         p_t, reward, c_max = p_t[:3]   # p_t, reward, c_max0 = p_t[:3] <-- Tarry's code lol
-                        v = reward + gamma / c_max
+                        v = reward + params["gamma"] / c_max
                         if v > v_best:
                             v_best = v
                         v_stars.append(v)
@@ -207,7 +211,7 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
 
                     with torch.no_grad():
                         max_q_prime = torch.stack([qnet_target(s_prime).squeeze() for s_prime in s_prime_batch]).max(dim=1, keepdim=True)[0]
-                        target = torch.tensor(r_batch, dtype=torch.float) + gamma * max_q_prime
+                        target = torch.tensor(r_batch, dtype=torch.float) + params["gamma"] * max_q_prime
 
                     loss = F.smooth_l1_loss(q_a, target)
                     optimizer.zero_grad()
@@ -243,7 +247,7 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
                             off[rd_idx] = (job, op, alter_m)
                     decode_result = decoding(process, setup, machines, off, decision_point_issue)
                     x_t, reward, c_max = decode_result[:3]
-                    offs[k] = (decode_result, reward + gamma / c_max)
+                    offs[k] = (decode_result, reward + params["gamma"] / c_max)
                 g_0 = [(p_0[i], v_stars[i]) for i in range(len(p_0))]
 
 
@@ -258,25 +262,33 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
 
                 p_0 = [g_t[0] for g_t in sorted(g_0, key=lambda x: x[1], reverse=True)[:params["pop_size"]]]
         else:
-            print("Herererererere")
+            print("None New Operated - Only for Operation prior one")
             p_0 = [decoding(process, setup, machines, [], decision_point_issue)]
         winner_data, _, _, winner_se_process, winner_se_setup = p_0[0]
         print({job: winner_se_process[job] for job in ini_set.keys() if job in winner_se_process}, end=" --> ")
         addition = correct_seq(winner_data.x)
-        print(addition)
-        entire_seq.extend(addition)
         print("----->>>>>", addition)
+        print({m: winner_se_setup[m] for m in machines if m in winner_se_setup})
         print()
         print("Origin DP :", decision_point_issue)
         for job in winner_se_process.keys():
             for op in winner_se_process[job].keys():
                 m = winner_se_process[job][op][2]
-                if m in decision_point_issue:
-                    if decision_point_issue[m][0] < winner_se_process[job][op][1]: decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
-                else: decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
+                if m not in decision_point_issue: decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
+                if winner_se_process[job][op][1] < decision_point_issue[m][0] or decision_point_issue[m][0] == 0: decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
+
         print("Added  DP :", decision_point_issue, end=" --> ")
         decision_point = min(decision_point_issue[m][0] for m in decision_point_issue.keys() if decision_point_issue[m][0])
         print(decision_point)
+
+        for m in winner_se_setup.keys():
+            for st, ed, prior_job, prior_op, now_job, now_op in winner_se_setup[m]:
+                if st < decision_point <= ed:
+                    decision_point_issue[m] = [ed, (prior_job, prior_op, now_job, now_op), "setup"]
+        print()
+        for job, op, m in addition:
+            if (job, op, m) not in entire_seq:
+                if winner_se_process[job][op][0] < decision_point: entire_seq.append((job, op, m))
         for m in decision_point_issue.keys():
             decision_point_issue[m][0] = max(decision_point_issue[m][0] - decision_point, 0)
         print("New    DP :", decision_point_issue, end=" --> ")
@@ -286,7 +298,11 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
 
         for job in ini_set.keys():
             for op in ini_set[job].keys():
-                if op != list(ini_set[job])[-1]:
+                if op == list(ini_set[job])[0] and (job, op) not in entire_seq_tmp:
+                    candidate_operation.append((job, op))
+                    break
+
+                elif op != list(ini_set[job])[-1]:
                     next_op = list(ini_set[job])[list(ini_set[job]).index(op) + 1]
                     if (job, op) in entire_seq_tmp and (job, next_op) not in entire_seq_tmp:
                         for job_tmp, op_tmp, m in entire_seq:
@@ -327,7 +343,7 @@ def start(processes, setups, machines_tmp, params):
     print(dynamic_fjsp(process, setup, ini_set, machines, params))
 
 def main():
-    num_job, max_num_op, num_machines, max_time = 3, 4, 3, 8
+    num_job, max_num_op, num_machines, max_time = 5, 4, 3, 8
     params = {"pop_size": 10, "mating_pool": 10, "gens": 1, "epoch": 1, "crossover": 0.8, "mutation": 0.1,
               "in_dim": 7, "hidden1_dim":16, "embed_dim":8, "num_heads_dim":8, "hidden2_dim":32, "out_dim":7,
               "max_len": 100, "batch_size": 50, "mini_batch": 30, "lr": 0.05, "gamma": 0.05}
