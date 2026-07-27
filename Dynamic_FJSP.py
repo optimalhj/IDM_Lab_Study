@@ -19,28 +19,16 @@ class Qnet(nn.Module):
         self.layer5 = nn.Linear(hidden2_dim, out_dim)
 
     def forward(self, data_tensor):
-        print(data_tensor.x)
-        print(data_tensor.edge_index)
         x = self.layer1(data_tensor.x, data_tensor.edge_index)
-        print(x)
         x = F.relu(x)
-        print(x)
         x = self.layer2(x, data_tensor.edge_index)
-        print(x)
         x = x.unsqueeze(0)
-        print(x)
         x, _ = self.layer3(x, x, x)
-        print(x)
         x = torch.mean(x.squeeze(0), dim=0, keepdim=True)
-        print(x)
         x = self.layer4(x)
-        print(x)
         x = F.relu(x)
-        print(x)
         x = self.layer5(x)
-        print(x)
         x = F.softmax(x, dim=-1)
-        print(x)
         return x
 
 class Memory:
@@ -225,11 +213,6 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
-
-                    print("q_a:", q_a)
-                    print("target:", target)
-                    print("loss:", loss)
-
                 offs, break_count, v_stars_off = [], 0, []
                 while len(offs) < len(p_0):
                     p1, p2, prior_len = 0, 0, len(offs)
@@ -252,17 +235,17 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
                 for k in range(len(offs)):
                     off = offs[k]
                     if len(off) and rd.random() < params["mutation"]:
-                        job, op, m_origin = off[rd.choice(len(off))]
-                        alternative_m = [m for m in idle_machine if m != m_origin]
-                        if not len(alternative_m):
-                            print("Alternatives :", alternative_m)
+                        rd_idx = rd.choice(len(off))
+                        job, op, m_origin = off[rd_idx]
+                        alternative_m = [m for m in idle_machine if m != m_origin and m in ini_set[job][op]]
+                        if len(alternative_m):
                             alter_m = str(rd.choice(alternative_m))
-                            print("Chosen :", alter_m)
-                            offs[i] = (job, op, alter_m)
+                            off[rd_idx] = (job, op, alter_m)
                     decode_result = decoding(process, setup, machines, off, decision_point_issue)
                     x_t, reward, c_max = decode_result[:3]
                     offs[k] = (decode_result, reward + gamma / c_max)
                 g_0 = [(p_0[i], v_stars[i]) for i in range(len(p_0))]
+
 
                 state_tmp_list = [state_tmp.x for (state_tmp, _, _, _, _), _ in g_0]
                 for off in offs:
@@ -278,20 +261,28 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
             print("Herererererere")
             p_0 = [decoding(process, setup, machines, [], decision_point_issue)]
         winner_data, _, _, winner_se_process, winner_se_setup = p_0[0]
+        print({job: winner_se_process[job] for job in ini_set.keys() if job in winner_se_process}, end=" --> ")
         addition = correct_seq(winner_data.x)
+        print(addition)
         entire_seq.extend(addition)
+        print("----->>>>>", addition)
+        print()
+        print("Origin DP :", decision_point_issue)
         for job in winner_se_process.keys():
             for op in winner_se_process[job].keys():
                 m = winner_se_process[job][op][2]
                 if m in decision_point_issue:
                     if decision_point_issue[m][0] < winner_se_process[job][op][1]: decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
                 else: decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
+        print("Added  DP :", decision_point_issue, end=" --> ")
         decision_point = min(decision_point_issue[m][0] for m in decision_point_issue.keys() if decision_point_issue[m][0])
-
+        print(decision_point)
         for m in decision_point_issue.keys():
             decision_point_issue[m][0] = max(decision_point_issue[m][0] - decision_point, 0)
+        print("New    DP :", decision_point_issue, end=" --> ")
         idle_machine = [m for m in machines if m not in decision_point_issue or not decision_point_issue[m][0]]
         candidate_operation, entire_seq_tmp = [], [(job_tmp, op_tmp) for job_tmp, op_tmp, _ in entire_seq]
+        print("Idle Machine :", idle_machine)
 
         for job in ini_set.keys():
             for op in ini_set[job].keys():
@@ -305,6 +296,10 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
                                     if decision_point_issue[m][0] == 0: candidate_operation.append((job, next_op))
                                 break
                         break
+        print("Candidate Operation :", candidate_operation)
+        print()
+        print("Entire_seq :", entire_seq)
+        print("-"*50)
     return entire_seq
 
 class Process:
