@@ -281,7 +281,10 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
             for op in winner_se_process[job].keys():
                 m = winner_se_process[job][op][2]
                 if m not in decision_point_issue: decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
-                if winner_se_process[job][op][1] < decision_point_issue[m][0] or decision_point_issue[m][0] == 0: decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
+                if winner_se_process[job][op][1] < decision_point_issue[m][0]:
+                    decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
+                if decision_point_issue[m][0] == 0:
+                    decision_point_issue[m] = [winner_se_process[job][op][1], (job, op)]
 
         print("Added  DP :", {m: decision_point_issue[m] for m in machines if m in decision_point_issue}, end=" --> ")
         decision_point = min(decision_point_issue[m][0] for m in decision_point_issue.keys() if decision_point_issue[m][0])
