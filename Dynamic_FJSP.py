@@ -209,7 +209,7 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
 
                 for j in range(len(p_0)):
                     memory.add_buffer(buffer=[s, q_results[j], v_stars[j], p_0[j][0]])
-                if 1: #len(memory.memory) > params["batch_size"]
+                if len(memory.memory) > params["batch_size"]:
                     s_batch, a_batch, r_batch, s_prime_batch = memory.sample()
 
                     q_out = torch.stack([qnet(s_tensor).squeeze() for s_tensor in s_batch])
@@ -223,20 +223,18 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
+
                 offs, break_count, v_stars_off = [], 0, []
                 while len(offs) < len(p_0):
                     p1, p2, prior_len = 0, 0, len(offs)
                     while p_0[p1] == p_0[p2]:
                         if len(p_0) == 1: break
                         p1, p2 = rd.choice(len(p_0), size=2, replace=False)
-                    if len(p_0[p1][0].x) >= 2 and rd.random() < params["crossover"]:
-                        o1, o2 = single_crossover(p_0[p1][0].x, p_0[p2][0].x)
-                        if o1 not in offs: offs.append(o1)
-                        if o2 not in offs: offs.append(o2)
-                    else:
-                        p1, p2 = correct_seq(p_0[p1][0].x), correct_seq(p_0[p2][0].x)
-                        if p1 not in offs: offs.append(p1)
-                        if p2 not in offs: offs.append(p2)
+
+                    if len(p_0[p1][0].x) >= 2 and rd.random() < params["crossover"]: born_offs = single_crossover(p_0[p1][0].x, p_0[p2][0].x)
+                    else:born_offs =  correct_seq(p_0[p1][0].x), correct_seq(p_0[p2][0].x)
+                    for off in born_offs:
+                        if off not in offs: offs.append(off)
                     if not len(offs) - prior_len:
                         break_count += 1
                         if break_count == 10: break
@@ -268,7 +266,6 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
 
                 p_0 = [g_t[0] for g_t in sorted(g_0, key=lambda x: x[1], reverse=True)[:params["pop_size"]]]
         else:
-            print("None New Operated - Only for Operation prior one")
             p_0 = [decoding(process, setup, machines, [], decision_point_issue)]
         winner_data, _, _, winner_se_process, winner_se_setup = p_0[0]
         print({job: winner_se_process[job] for job in ini_set.keys() if job in winner_se_process})
