@@ -75,7 +75,7 @@ def step(action, point):
         else:
             point[1] += 1
             move_succeed = True
-    elif action == 3: # Right
+    elif action == 2: # Right
         if point[0] == 8:
             pass
         elif point[0] == 2 and point[1] in [3,4,5]:
@@ -156,8 +156,21 @@ def start():
                 print(coordinates[x][y], end=" ")
         print()
     print("    " + " ".join([f"{i}" for i in range(1, 9)]))
+
+    print("-" * 50)
+    for y in range(5, 0, -1):
+        print(y, end=" : ")
+        for x in range(1, 9):
+            if len(coordinates[x][y]) == 1:
+                print(coordinates[x][y], end=" ")
+            else:
+                state_list = state([x, y])
+                with torch.no_grad():
+                    action = qnet(torch.tensor(state_scaling(state_list), dtype=torch.float)).argmax().item()
+                print(movement[action], end=" ")
+        print()
+    print("    " + " ".join([f"{i}" for i in range(1, 9)]))
 def main():
     start()
-
 if __name__ == '__main__':
     main()
