@@ -1,6 +1,5 @@
 from numpy import random as rd
 from collections import deque
-from copy import deepcopy
 
 import torch
 import torch.nn as nn
@@ -153,8 +152,7 @@ def single_crossover(p1, p2):
     return off1, off2
 
 def dynamic_fjsp(process, setup, ini_set, machines, params):
-    qnet = Qnet(in_dim=params["in_dim"], hidden1_dim=params["hidden1_dim"], embed_dim=params["embed_dim"], num_heads_dim=params["num_heads_dim"], hidden2_dim=params["hidden2_dim"], out_dim=params["out_dim"])
-    qnet_target = deepcopy(qnet)
+    qnet, qnet_target = [Qnet(in_dim=params["in_dim"], hidden1_dim=params["hidden1_dim"], embed_dim=params["embed_dim"], num_heads_dim=params["num_heads_dim"], hidden2_dim=params["hidden2_dim"], out_dim=params["out_dim"]) for _ in range(2)]
     optimizer, memory, cache = optim.Adam(qnet.parameters(), lr=params["lr"]), Memory(params["mini_batch"]), []
     qnet_target.load_state_dict(qnet.state_dict())
     qnet_target.eval()
