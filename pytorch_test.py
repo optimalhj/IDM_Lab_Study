@@ -95,6 +95,9 @@ def step(action, point):
             move_succeed = True
     return move_succeed
 def start():
+    coordinates = {x: {y: {0:0, 1:0, 2:0, 3:0} if x != 8 or y != 1 else "G" for y in range(1, 6)} for x in range(1, 9)}
+    for y in range(3, 6): coordinates[3][y] = "N"
+    for y in range(1, 4): coordinates[6][y] = "N"
     qnet, qnet_target = [Qnet() for _ in range(2)]
     qnet_target.load_state_dict(qnet.state_dict())
     qnet_target.eval()
@@ -103,7 +106,7 @@ def start():
     memory = ReplayMemory(max_len=2000, sample_size=150)
     epsilon = 1
     entire_count = {}
-    for epoch in range(40):
+    for epoch in range(5000):
         entire_count[f"Trial {epoch + 1}"] = 0
         point, done = [1, 5], False
         while not done:
@@ -115,8 +118,12 @@ def start():
 
             done = (state_prime_list[0] == 8 and state_prime_list[1] == 1)
 
-            if done: reward = 100
-            elif move_succeed: reward = -1
+            if done:
+                reward = 100
+                coordinates[state_list[0]][state_list[1]][action] += 1
+            elif move_succeed:
+                reward = -1
+                coordinates[state_list[0]][state_list[1]][action] += 1
             else: reward = -5
             memory.add_buffer((state_list, action, reward, state_prime_list, 1 if done else 0))
             if len(memory.memory) > 32:
@@ -136,7 +143,19 @@ def start():
 
         if epoch % 5 == 0:
             qnet_target.load_state_dict(qnet.state_dict())
-        print(f"Trial {epoch + 1} :", entire_count[f"Trial {epoch + 1}"])
+        # print(f"Trial {epoch + 1} :", entire_count[f"Trial {epoch + 1}"])
+
+    movement = {0:"L", 1:"U", 2:"R", 3:"D"}
+    for y in range(5, 0, -1):
+        print(y, end=" : ")
+        for x in range(1, 9):
+            if len(coordinates[x][y]) != 1:
+                action = max([0, 1, 2, 3], key=lambda direction:coordinates[x][y][direction])
+                print(movement[action], end=" ")
+            else:
+                print(coordinates[x][y], end=" ")
+        print()
+    print("    " + " ".join([f"{i}" for i in range(1, 9)]))
 def main():
     start()
 
