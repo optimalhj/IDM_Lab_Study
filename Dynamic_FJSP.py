@@ -181,7 +181,9 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
             p_0.append(individual)
         if len(p_0[0]):
 
-            s, q_results = decoding(process, setup, machines, p_0[0], decision_point_issue)[0], torch.distributions.Categorical(qnet(decoding(process, setup, machines, entire_seq if len(entire_seq) else ini_seq_tmp)[0])).sample((params["pop_size"],))
+            s = decoding(process, setup, machines, p_0[0], decision_point_issue)[0]
+            with torch.no_grad():
+                q_results = torch.distributions.Categorical(qnet(decoding(process, setup, machines, entire_seq if len(entire_seq) else ini_seq_tmp)[0])).sample((params["pop_size"],))
             p_0 = [decoding(process, setup, machines, p_t2, decision_point_issue) for p_t2 in (sequence_rule(process, ini_set, action, p_t) for action, p_t in zip(q_results, p_0))]
 
             for i in range(params["epoch"]):
@@ -263,6 +265,7 @@ def dynamic_fjsp(process, setup, ini_set, machines, params):
                     if done: g_0.append(off)
 
                 p_0 = [g_t[0] for g_t in sorted(g_0, key=lambda x: x[1], reverse=True)[:params["pop_size"]]]
+                if i % 5 == 0: qnet_target.load_state_dict(qnet.state_dict())
         else:
             p_0 = [decoding(process, setup, machines, [], decision_point_issue)]
         winner_data, _, _, winner_se_process, winner_se_setup = p_0[0]
