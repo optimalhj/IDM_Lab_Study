@@ -159,7 +159,7 @@ def predictive_mobile_refuel(rts, ams, study_region, params):
     for am in ams.keys():
         print(f"{am} : {ams[am].location}")
 
-    time_period = 150
+    time_period = params["time_period"]
 
     for i in range(1, params["epoch"] + 1):
         refueling_list = []
@@ -216,7 +216,8 @@ def predictive_mobile_refuel(rts, ams, study_region, params):
             print()
             for am in ams.keys():
                 print(f"{am} : {ams[am].location} to {ams[am].destination}, {ams[am].fuel}({round(ams[am].max_fuel * ams[am].request_fuel_rate, 2)})/{ams[am].max_fuel}")
-    return 0
+
+    return study_region
 
 
 class RT:
@@ -312,7 +313,7 @@ class AM:
         self.destination = None
     def move(self, study_region, t):
 
-        dont_move_bool = self.destination is None and "F" not in (study_region[x][y] for x in range(1, self.width + 1) for y in range(1, self.length + 1))
+        dont_move_bool = self.location == list(self.platform).copy() and self.destination is None and "F" not in (study_region[x][y] for x in range(1, self.width + 1) for y in range(1, self.length + 1))
         if self.fuel > 0 and not dont_move_bool:
             waiting_count = 0
             for i in range(1 if study_region[self.location[0]][self.location[1]] in ("F", "D") else self.speed):
@@ -332,7 +333,6 @@ class AM:
                             break
                     if not break1:
                         self.destination = list(self.platform).copy()
-                        print("Every Work Done")
                     else:
                         self.destination = list(random.sample(candidate_destination, 1)[0])
 
@@ -385,8 +385,8 @@ class AM:
                     self.accumulated_working_time += 1
                 print()
             self.fuel = max(0, self.fuel - self.consuming_rate)
-
-        if self.fuel < self.max_fuel * self.request_fuel_rate: self.request += 1
+            if self.fuel < self.max_fuel * self.request_fuel_rate: self.request += 1
+        if dont_move_bool: self.request = -1
         if self.fuel == 0 and self.w_waiting_st == 0: self.w_waiting_st = t
 
     def refuel(self, rt, t):
@@ -451,7 +451,7 @@ def main():
     width, length, tree_ratio, max_ratio = 10, 15, 0.15, 0.35
     min_request_fuel_rate, max_request_fuel_rate = 0.6, 0.8
 
-    params = {"epoch": 1, "w_d": 0.4, "w_r": 0.6,
+    params = {"epoch": 1, "w_d": 0.4, "w_r": 0.6, "time_period": 300,
               "in_dim_crd": 16, "hidden1_dim_crd": 64, "hidden2_dim_crd": 32, "hidden3_dim_crd": 16, "hidden4_dim_crd": 8, "out_dim_crd": 1,
               "in_dim_trs": 11, "embed_dim_trs": 16, "num_heads_dim_trs": 16, "hidden1_dim_trs": 2, "hidden2_dim_trs": 4, "out_dim_trs": 5,
               "max_len_crd": 100, "batch_size_crd": 50, "mini_batch_crd": 30, "crd_lr": 0.05, "gamma_crd": 0.05,
@@ -460,7 +460,6 @@ def main():
     refueling_tankers = {f"rt{i}": [random.randint(2, 3), random.randint(3, 5), random.randint(5, 8)] for i in range(random.randint(min_rt, max_rt))}
     agricultural_machines = {f"am{i}": [random.randint(2, 4), random.randint(120, 150), random.randint(3, 5), random.uniform(min_request_fuel_rate, max_request_fuel_rate)] for i in range(random.randint(min_am, max_am))}
     study_region = {x: {y: "F" for y in range(1, length + 1)} for x in range(1, width + 1)}
-
 
     width_format, length_format, decent = 2, 1, 10
     while 1:
@@ -481,6 +480,7 @@ def main():
 
     for x, y in loads:
         study_region[x][y] = "L"
+
     for y in range(length, 0, -1):
         print(f"{y :>{length_format}} : ", end="")
         for x in range(1, width + 1):
@@ -488,7 +488,13 @@ def main():
         print()
     print(" " * (length_format + 3) + "".join([f"{j:>{width_format}} " for j in range(1, width + 1)]))
 
-    start(refueling_tankers, agricultural_machines, study_region, platform, params)
+    study_region = start(refueling_tankers, agricultural_machines, study_region, platform, params)
 
+    for y in range(length, 0, -1):
+        print(f"{y :>{length_format}} : ", end="")
+        for x in range(1, width + 1):
+            print(f"{study_region[x][y] : >{width_format}}", end=" ")
+        print()
+    print(" " * (length_format + 3) + "".join([f"{j:>{width_format}} " for j in range(1, width + 1)]))
 if __name__ == '__main__':
     main()
