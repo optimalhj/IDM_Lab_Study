@@ -7,7 +7,7 @@ from collections import deque
 import numpy as np
 import random
 import math
-
+from copy import deepcopy
 
 class CentralRequestDispatcher(nn.Module):
     def __init__(self, in_dim_crd, hidden1_dim_crd, hidden2_dim_crd, hidden3_dim_crd, hidden4_dim_crd, out_dim_crd):
@@ -143,7 +143,7 @@ def reward_calculator(rt, ams, w_d, geographical_distance):
 
     return potential
 
-def predictive_mobile_refuel(rts, ams, study_region, params):
+def predictive_mobile_refuel(rts, ams, study_region, show_study_region, params):
     (crd, crd_target) = [CentralRequestDispatcher(params["in_dim_crd"], params["hidden1_dim_crd"], params["hidden2_dim_crd"], params["hidden3_dim_crd"], params["hidden4_dim_crd"], params["out_dim_crd"]) for _ in range(2)]
     (trs, trs_target) = [TankerRepositionScheduler(params["in_dim_trs"], params["embed_dim_trs"], params["num_heads_dim_trs"], params["hidden1_dim_trs"], params["hidden2_dim_trs"], params["out_dim_trs"], params["w_d"]) for _ in range(2)]
     crd_target.load_state_dict(crd.state_dict())
@@ -152,7 +152,10 @@ def predictive_mobile_refuel(rts, ams, study_region, params):
     trs_target.eval()
     crd_optimizer, crd_memory, trs_optimizer, trs_memory= optim.Adam(crd.parameters(), lr=params["crd_lr"]), ReplayMemory(max_len=params["max_len_crd"], sample_size=params["mini_batch_crd"]), optim.Adam(trs.parameters(), lr=params["trs_lr"]), ReplayMemory(max_len=params["max_len_trs"], sample_size=params["mini_batch_trs"])
 
+    initial_study_region = deepcopy(study_region)
     print("\n----------Start----------")
+    show_study_region.show(study_region)
+    print()
     for rt in rts.keys():
         print(f"{rt} : {rts[rt].location}")
     print()
@@ -162,6 +165,8 @@ def predictive_mobile_refuel(rts, ams, study_region, params):
     time_period = params["time_period"]
 
     for i in range(1, params["epoch"] + 1):
+        print()
+        show_study_region.show(study_region)
         refueling_list = []
         for t in range(1, time_period + 1):
             print(f"\n---------- Time : {t:2} ----------")
@@ -216,9 +221,10 @@ def predictive_mobile_refuel(rts, ams, study_region, params):
             print()
             for am in ams.keys():
                 print(f"{am} : {ams[am].location} to {ams[am].destination}, {ams[am].fuel}({round(ams[am].max_fuel * ams[am].request_fuel_rate, 2)})/{ams[am].max_fuel}")
-
+        print()
+        show_study_region.show(study_region)
+        study_region = deepcopy(initial_study_region)
     return study_region
-
 
 class RT:
     def __init__(self, width, length, platform, v_in, v_out, charging_rate):
@@ -399,6 +405,30 @@ class AM:
             self.w_waiting_st = 0
             return w_waiting
         else: return False
+
+class InitialStudyRegion:
+    def __init__(self, width, length, study_region):
+        self.width = width
+        self.length = length
+        self.width_format, self.length_format, decent1, decent2 = 2, 1, 10, 10
+        while 1:
+            if self.width / decent1 >= 1:
+                self.width_format += 1
+                decent1 *= 10
+            else: break
+        while 1:
+            if self.length / decent2 >= 1:
+                self.length_format += 1
+                decent2 *= 10
+            else: break
+    def show(self, study_region):
+        for y in range(self.length, 0, -1):
+            print(f"{y :>{self.length_format}} : ", end="")
+            for x in range(1, self.width + 1):
+                print(f"{study_region[x][y] : >{self.width_format}}", end=" ")
+            print()
+        print(" " * (self.length_format + 3) + "".join([f"{j:>{self.width_format}} " for j in range(1, self.width + 1)]))
+
 def start(refueling_tankers, agricultural_machines, study_region, platform, params):
     width = max(study_region.keys())
     length = max(study_region[width].keys())
@@ -410,7 +440,8 @@ def start(refueling_tankers, agricultural_machines, study_region, platform, para
     for am in agricultural_machines:
         speed, fuel, consuming_rate, request_fuel_rate = agricultural_machines[am]
         ams[am] = AM(width=width, length=length, platform=platform, speed=speed, fuel=fuel, consuming_rate=consuming_rate, request_fuel_rate=request_fuel_rate)
-    return predictive_mobile_refuel(rts, ams, study_region, params)
+    initial_study_region = InitialStudyRegion(width=width, length=length, study_region=study_region)
+    return predictive_mobile_refuel(rts, ams, study_region, initial_study_region, params)
 
 def set_load(x, y, length, width, platform, tree_ratio, max_ratio, loads):
     point, prior_direction, continuous_exception = [x, y], 4, []
@@ -451,7 +482,7 @@ def main():
     width, length, tree_ratio, max_ratio = 10, 15, 0.15, 0.35
     min_request_fuel_rate, max_request_fuel_rate = 0.6, 0.8
 
-    params = {"epoch": 1, "w_d": 0.4, "w_r": 0.6, "time_period": 300,
+    params = {"epoch": 5, "w_d": 0.4, "w_r": 0.6, "time_period": 300,
               "in_dim_crd": 16, "hidden1_dim_crd": 64, "hidden2_dim_crd": 32, "hidden3_dim_crd": 16, "hidden4_dim_crd": 8, "out_dim_crd": 1,
               "in_dim_trs": 11, "embed_dim_trs": 16, "num_heads_dim_trs": 16, "hidden1_dim_trs": 2, "hidden2_dim_trs": 4, "out_dim_trs": 5,
               "max_len_crd": 100, "batch_size_crd": 50, "mini_batch_crd": 30, "crd_lr": 0.05, "gamma_crd": 0.05,
@@ -461,18 +492,6 @@ def main():
     agricultural_machines = {f"am{i}": [random.randint(2, 4), random.randint(120, 150), random.randint(3, 5), random.uniform(min_request_fuel_rate, max_request_fuel_rate)] for i in range(random.randint(min_am, max_am))}
     study_region = {x: {y: "F" for y in range(1, length + 1)} for x in range(1, width + 1)}
 
-    width_format, length_format, decent = 2, 1, 10
-    while 1:
-        if width / decent >= 1:
-            width_format += 1
-            decent *= 10
-        else: break
-    decent = 10
-    while 1:
-        if length / decent >= 1:
-            length_format += 1
-            decent *= 10
-        else: break
     platform = (random.randint(1, width), random.randint(1, length))
     study_region[platform[0]][platform[1]] = "P"
 
@@ -481,20 +500,7 @@ def main():
     for x, y in loads:
         study_region[x][y] = "L"
 
-    for y in range(length, 0, -1):
-        print(f"{y :>{length_format}} : ", end="")
-        for x in range(1, width + 1):
-            print(f"{study_region[x][y] : >{width_format}}", end=" ")
-        print()
-    print(" " * (length_format + 3) + "".join([f"{j:>{width_format}} " for j in range(1, width + 1)]))
-
     study_region = start(refueling_tankers, agricultural_machines, study_region, platform, params)
 
-    for y in range(length, 0, -1):
-        print(f"{y :>{length_format}} : ", end="")
-        for x in range(1, width + 1):
-            print(f"{study_region[x][y] : >{width_format}}", end=" ")
-        print()
-    print(" " * (length_format + 3) + "".join([f"{j:>{width_format}} " for j in range(1, width + 1)]))
 if __name__ == '__main__':
     main()
