@@ -165,12 +165,14 @@ def predictive_mobile_refuel(rts, ams, study_region, params):
         refueling_list = []
         for t in range(1, time_period + 1):
             print(f"\n---------- Time : {t:2} ----------")
-            print("Now Refueling :", refueling_list)
+            # print("Now Refueling :", refueling_list)
             requests = []
             for am in [am for am in ams if not ams[am].refueling]:
+                print(f"AM : {am}({ams[am].speed})")
                 ams[am].move(study_region=study_region, t=t)
                 if ams[am].request >= 0:
                     requests.append(am)
+                print()
             able_rts = [rt for rt in rts.keys() if not rts[rt].refueling]
 
             print("Able_rts :", able_rts)
@@ -213,7 +215,7 @@ def predictive_mobile_refuel(rts, ams, study_region, params):
                 print(f"{rt} : {rts[rt].location}")
             print()
             for am in ams.keys():
-                print(f"{am} : {ams[am].location}, {ams[am].fuel}({round(ams[am].max_fuel * ams[am].request_fuel_rate, 2)})/{ams[am].max_fuel}")
+                print(f"{am} : {ams[am].location} to {ams[am].destination}, {ams[am].fuel}({round(ams[am].max_fuel * ams[am].request_fuel_rate, 2)})/{ams[am].max_fuel}")
     return 0
 
 
@@ -250,7 +252,7 @@ class RT:
                 candidate_list.append([self.location[0], self.location[1] + front_back_direction])
 
             for x, y in candidate_list:
-                if study_region[x][y] != "F":
+                if study_region[x][y] not in ("F", "D"):
                     priority_list.append((x, y))
 
             left_move -= 1
@@ -258,11 +260,11 @@ class RT:
                 self.location = list(random.sample(priority_list, 1)[0])
             else:
                 if len(candidate_list):
-                    if study_region[self.location[0]][self.location[1]] != "F":
+                    if study_region[self.location[0]][self.location[1]] not in ("F", "D"):
                         self.location = list(random.sample(candidate_list, 1)[0])
                     else:
                         decision_distance = 1 / 2 * (1 / self.v_in + 1 / self.v_out)
-                        decision_bool = random.random() < decision_distance
+                        decision_bool = random.random() > decision_distance
                         if decision_bool:
                             self.location = list(random.sample(candidate_list, 1)[0])
                         else:
@@ -293,7 +295,7 @@ class AM:
     def __init__(self, width, length, platform, speed, fuel, consuming_rate, request_fuel_rate):
         self.width = width
         self.length = length
-
+        self.platform = platform
         self.location = list(platform).copy()
         self.speed = speed
         self.fuel = fuel
@@ -307,28 +309,81 @@ class AM:
         self.refueling_amount = 0
         self.refueling = False
         self.request_fuel_rate = request_fuel_rate
+        self.destination = None
     def move(self, study_region, t):
-        if self.fuel > 0:
-            if study_region[self.location[0]][self.location[1]] == "F":
-                self.accumulated_working_time += 1
-            for _ in range(1 if study_region[self.location[0]][self.location[1]] == "F" else self.speed):
-                x, y = self.location
-                able_direction = [0, 1, 2, 3]
-                if x == 1: able_direction.remove(0)
-                if y == self.length: able_direction.remove(1)
-                if x == self.width: able_direction.remove(2)
-                if y == 1: able_direction.remove(3)
-                chosen_direction = random.choice(able_direction)
-                if chosen_direction == 0:
-                    self.location[0] -= 1
-                elif chosen_direction == 1:
-                    self.location[1] += 1
-                elif chosen_direction == 2:
-                    self.location[0] += 1
+
+        dont_move_bool = self.destination is None and "F" not in (study_region[x][y] for x in range(1, self.width + 1) for y in range(1, self.length + 1))
+        if self.fuel > 0 and not dont_move_bool:
+            waiting_count = 0
+            for i in range(1 if study_region[self.location[0]][self.location[1]] in ("F", "D") else self.speed):
+                print(f"{i + 1} th move Now Location :", self.location, f"and wanna go to {self.destination}")
+                if self.destination is None:
+                    candidate_destination, break1 = [], False
+                    for search in range(1, self.length + self.width):
+                        for delta_x in range(0, search + 1):
+                            for side_direction in (-1, 1):
+                                for fron_back_direction in (-1, 1):
+                                    x, y = int(self.location[0] + side_direction * delta_x), int(self.location[1] + fron_back_direction * (search - delta_x))
+                                    if 1 <= x <= self.width and 1 <= y <= self.length and study_region[x][y] == "F" and (x, y) not in candidate_destination:
+                                        print(f"({search})  Delta x :", side_direction * delta_x, "  /  Delta_y :", fron_back_direction * (search - delta_x), "    ---->>>>    ", x, y)
+                                        candidate_destination.append((x, y))
+                                        break1 = True
+                        if break1:
+                            break
+                    if not break1:
+                        self.destination = list(self.platform).copy()
+                        print("Every Work Done")
+                    else:
+                        self.destination = list(random.sample(candidate_destination, 1)[0])
+
+                candidate_direction, priority_direction = [], []
+                delta_x, delta_y = self.destination[0] - self.location[0], self.destination[1] - self.location[1]
+                if delta_x != 0:
+                    new_x = int(self.location[0] + np.copysign(1, delta_x))
+                    candidate_direction.append([new_x, self.location[1]].copy())
+                    if study_region[new_x][self.location[1]] not in ("F", "D"):
+                        priority_direction.append([new_x, self.location[1]].copy())
+                if delta_y != 0:
+                    new_y = int(self.location[1] + np.copysign(1, delta_y))
+                    candidate_direction.append([self.location[0], new_y])
+                    if study_region[self.location[0]][new_y] not in ("F", "D"):
+                        priority_direction.append([self.location[0], new_y])
+                print("Candidates :", candidate_direction, end="  -->>  ")
+                if len(priority_direction):
+                    assigned = random.randint(0, len(priority_direction)-1)
+                    print("Priority Assigned :", assigned, end=f"  -->>  {priority_direction[assigned]}  -->>  ")
+                    assigned = priority_direction[assigned]
+                    self.location = assigned
                 else:
-                    self.location[1] -= 1
-                x, y = self.location
-                if study_region[x][y] == "F": break
+                    if len(candidate_direction):
+                        if study_region[self.location[0]][self.location[1]] not in ("F", "D"):
+                            assigned = random.randint(0, len(candidate_direction) - 1)
+                            print("Candidate Assigned :", assigned, end=f"  -->>  {candidate_direction[assigned]}  -->>  ")
+                            assigned = candidate_direction[assigned]
+                            self.location = assigned
+                        else:
+                            decision_distance = 1 / 2 * (1 + 1 / self.speed)
+                            decision_bool = random.random() > decision_distance
+                            if decision_bool:
+                                assigned = random.randint(0, len(candidate_direction) - 1)
+                                print("Candidate Assigned :", assigned, end=f"  -->>  {candidate_direction[assigned]}  -->>  ")
+                                assigned = candidate_direction[assigned]
+                                self.location = assigned
+                            else:
+                                if waiting_count > decision_distance:
+                                    assigned = random.randint(0, len(candidate_direction) - 1)
+                                    print("Candidate Assigned :", assigned, end=f"  -->>  {candidate_direction[assigned].copy()}  -->>  ")
+                                    assigned = candidate_direction[assigned].copy()
+                                    self.location = assigned
+                                    waiting_count = 0
+                                else: print("But because of Boundary issue, It can't move", end="  -->>  ")
+                                waiting_count += 1
+                print("Moved to  :", self.location)
+                if self.location == self.destination: self.destination = None
+                if study_region[self.location[0]][self.location[1]] == "F":
+                    study_region[self.location[0]][self.location[1]] = "D"
+                    self.accumulated_working_time += 1
+                print()
             self.fuel = max(0, self.fuel - self.consuming_rate)
 
         if self.fuel < self.max_fuel * self.request_fuel_rate: self.request += 1
