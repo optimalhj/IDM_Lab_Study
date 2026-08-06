@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv
 import torch.optim as optim
 
 from collections import deque
@@ -118,15 +117,24 @@ def tks_transformer_encoder(rts, ams, t):
         entire_state.append(batch)
     return entire_state
 
-def assign_rt_am(rts, ams, study_region, t):
+def assign_rt_am(rt, am, rts, ams, study_region, t, refueling_list):
     contact = rts.crd_move(ams, study_region=study_region)
-    if contact:
-        ams.refueling = True
-        ams.request = -1
-        done = ams.refuel(rts, t)
+    print(f"Contact:{contact}", end="")
+    if contact and (rt, am) not in refueling_list:
+        refueling_list.append((rt, am))
+        print(tuple(rts.location), end="")
+
+def refuel_process(rts, ams,t, refueling_list):
+    done_list = []
+    for (rt, am) in refueling_list:
+        done = ams[am].refuel(rts[rt], t)
+        print(f"{rt} -- {am} : {done}({ams[am].fuel}/{ams[am].max_fuel}),Refueled:{rts[rt].charging_rate}")
         if done:
-            rts.stop_assign(contact=True)
-            ams.refueling = False
+            rts[rt].stop_assign(contact=True)
+            ams[am].refueling = False
+            done_list.append((rt, am))
+    for assign_set in done_list:
+        refueling_list.remove(assign_set)
 
 def reward_calculator(rt, ams, w_d, geographical_distance):
     potential = 0
@@ -144,19 +152,34 @@ def predictive_mobile_refuel(rts, ams, study_region, params):
     trs_target.eval()
     crd_optimizer, crd_memory, trs_optimizer, trs_memory= optim.Adam(crd.parameters(), lr=params["crd_lr"]), ReplayMemory(max_len=params["max_len_crd"], sample_size=params["mini_batch_crd"]), optim.Adam(trs.parameters(), lr=params["trs_lr"]), ReplayMemory(max_len=params["max_len_trs"], sample_size=params["mini_batch_trs"])
 
+    print("\n----------Start----------")
+    for rt in rts.keys():
+        print(f"{rt} : {rts[rt].location}")
+    print()
+    for am in ams.keys():
+        print(f"{am} : {ams[am].location}")
+
     time_period = 150
 
     for i in range(1, params["epoch"] + 1):
+        refueling_list = []
         for t in range(1, time_period + 1):
+            print(f"\n---------- Time : {t:2} ----------")
+            print("Now Refueling :", refueling_list)
             requests = []
             for am in [am for am in ams if not ams[am].refueling]:
                 ams[am].move(study_region=study_region, t=t)
                 if ams[am].request >= 0:
                     requests.append(am)
             able_rts = [rt for rt in rts.keys() if not rts[rt].refueling]
-            # print(requests)
-            # for am in requests:
-            #     print(am, ":", ams[am].request)
+
+            print("Able_rts :", able_rts)
+
+            print("Requests :", requests)
+            for am in requests:
+                print(am, ":", ams[am].request, end="   ")
+
+            print("\n\nPaired :")
             while len(able_rts) and len(requests):
                 entire_state_assign = crd_transformer_encoder({rt: rts[rt] for rt in able_rts}, {am: ams[am] for am in requests}, t)
                 state_tensor = torch.tensor(entire_state_assign, dtype=torch.float)
@@ -167,11 +190,15 @@ def predictive_mobile_refuel(rts, ams, study_region, params):
                 # print(q_result, "-->", action)
                 chosen_rt = f"rt{entire_state_assign[action][0]}"
                 chosen_am = f"am{entire_state_assign[action][6]}"
-                # print(chosen_rt, chosen_am)
+                print(f"{chosen_rt}{tuple(rts[chosen_rt].location)} -- {chosen_am}{tuple(ams[chosen_am].location)}", end="  :  ")
                 able_rts.remove(chosen_rt)
                 requests.remove(chosen_am)
-
+                assign_rt_am(chosen_rt, chosen_am, rts[chosen_rt], ams[chosen_am], study_region, t, refueling_list)
+                print()
                 # crd_memory.add_buffer([entire_state_assign, action, ])
+            print("\nCharging State :")
+            refuel_process(rts, ams, t, refueling_list)
+            print()
 
             for rt in able_rts:
                 entire_state_unassign = tks_transformer_encoder(rts[rt], ams, t)
@@ -181,6 +208,12 @@ def predictive_mobile_refuel(rts, ams, study_region, params):
                     action = q_result.argmax().item()
                 rts[rt].tks_move(action=action, study_region=study_region)
 
+            print("\nMoved to :")
+            for rt in rts.keys():
+                print(f"{rt} : {rts[rt].location}")
+            print()
+            for am in ams.keys():
+                print(f"{am} : {ams[am].location}, {ams[am].fuel}({round(ams[am].max_fuel * ams[am].request_fuel_rate, 2)})/{ams[am].max_fuel}")
     return 0
 
 
@@ -198,18 +231,27 @@ class RT:
     def crd_move(self, am, study_region):
         self.assignment_state = 1
         self.destination = am.location
+
         left_move, waiting_count = max(self.v_in, self.v_out), 0
         while left_move:
+            if self.location == self.destination:
+                self.refueling = True
+                am.refueling = True
+                am.request = -1
+                return True
             side_direction = self.destination[0] - self.location[0]
             side_direction = round(math.copysign(1, side_direction)) if side_direction != 0 else 0
             front_back_direction = self.destination[1] - self.location[1]
             front_back_direction = round(math.copysign(1, front_back_direction)) if front_back_direction != 0 else 0
             candidate_list, priority_list = [], []
-            if side_direction: candidate_list.append([self.location[0] + side_direction, self.location[1]])
-            if front_back_direction: candidate_list.append([self.location[0], self.location[1] + front_back_direction])
+            if side_direction:
+                candidate_list.append([self.location[0] + side_direction, self.location[1]])
+            if front_back_direction:
+                candidate_list.append([self.location[0], self.location[1] + front_back_direction])
 
             for x, y in candidate_list:
-                if study_region[x][y] != "F": priority_list.append((x, y))
+                if study_region[x][y] != "F":
+                    priority_list.append((x, y))
 
             left_move -= 1
             if len(priority_list):
@@ -228,9 +270,6 @@ class RT:
                                 self.location = list(random.sample(candidate_list, 1)[0])
                                 waiting_count = 0
                             waiting_count += 1
-            if self.location == self.destination:
-                self.refueling = True
-                return True
         return False
 
     def stop_assign(self, contact=False):
@@ -297,7 +336,7 @@ class AM:
 
     def refuel(self, rt, t):
         prior_fuel = self.fuel
-        self.fuel = max(self.max_fuel, self.fuel + rt.charging_rate)
+        self.fuel = min(self.max_fuel, self.fuel + rt.charging_rate)
         self.refueling_amount += (self.fuel - prior_fuel)
         if self.fuel == self.max_fuel:
             self.last_refueling_time = t
@@ -355,7 +394,7 @@ def main():
     min_rt, max_rt = 2, 4
     min_am, max_am = 3, 6
     width, length, tree_ratio, max_ratio = 10, 15, 0.15, 0.35
-    min_request_fuel_rate, max_request_fuel_rate = 0.25, 0.4
+    min_request_fuel_rate, max_request_fuel_rate = 0.6, 0.8
 
     params = {"epoch": 1, "w_d": 0.4, "w_r": 0.6,
               "in_dim_crd": 16, "hidden1_dim_crd": 64, "hidden2_dim_crd": 32, "hidden3_dim_crd": 16, "hidden4_dim_crd": 8, "out_dim_crd": 1,
@@ -363,7 +402,7 @@ def main():
               "max_len_crd": 100, "batch_size_crd": 50, "mini_batch_crd": 30, "crd_lr": 0.05, "gamma_crd": 0.05,
               "max_len_trs": 100, "batch_size_trs": 50, "mini_batch_trs": 30, "trs_lr": 0.05, "gamma_trs": 0.05}
 
-    refueling_tankers = {f"rt{i}": [random.randint(2, 3), random.randint(3, 5), random.randint(10, 20)] for i in range(random.randint(min_rt, max_rt))}
+    refueling_tankers = {f"rt{i}": [random.randint(2, 3), random.randint(3, 5), random.randint(5, 8)] for i in range(random.randint(min_rt, max_rt))}
     agricultural_machines = {f"am{i}": [random.randint(2, 4), random.randint(120, 150), random.randint(3, 5), random.uniform(min_request_fuel_rate, max_request_fuel_rate)] for i in range(random.randint(min_am, max_am))}
     study_region = {x: {y: "F" for y in range(1, length + 1)} for x in range(1, width + 1)}
 
