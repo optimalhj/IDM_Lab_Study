@@ -34,7 +34,7 @@ class EasyMatchAgent(BaseDispatchAgent):
         # 表示无上次训练文件
         if last_time_train_epoch==-1:
             begin_episode = 1
-            print_with_time(f'没有在{read_path}找到DISPATCH模型参数，从头开始训练EasyMatch')
+            print_with_time(f'No training files found in {read_path}. Starting training from scratch.') # 没有在{read_path}找到DISPATCH模型参数，从头开始训练EasyMatch
         else:
         # 有训练文件
         # 如果不为-1，表示指定加载某一轮次的模型
@@ -43,7 +43,7 @@ class EasyMatchAgent(BaseDispatchAgent):
             
             begin_episode = last_time_train_epoch + 1
             self.algo.load(read_path,last_time_train_epoch)
-            print_with_time(f'从{read_path}加载DISPATCH模型EasyMatch参数，最后训练轮次为{last_time_train_epoch}，本次从第{begin_episode}轮开始训练/测试')
+            print_with_time(f'Loaded DISPATCH model parameters from {read_path}, last training epoch was {last_time_train_epoch}. Resuming training from epoch {begin_episode}.') # 从{read_path}加载DISPATCH模型EasyMatch参数，最后训练轮次为{last_time_train_epoch}，本次从第{begin_episode}轮开始训练/测试
             
             
         return begin_episode

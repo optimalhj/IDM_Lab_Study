@@ -24,7 +24,7 @@ class ChihayaRepositionAgent(BaseRepositionAgent):
         # 表示无上次训练文件
         if last_time_train_epoch==-1:
             begin_episode = 1
-            print_with_time(f'没有在{MODEL_REPOSITION_SAVE_DIR}找到REPOSITION模型参数，从头开始训练Chihaya')
+            # print_with_time(f'没有在{MODEL_REPOSITION_SAVE_DIR}找到REPOSITION模型参数，从头开始训练Chihaya')
         else:
         # 有训练文件
         # 如果不为-1，表示指定加载某一轮次的模型
@@ -33,7 +33,7 @@ class ChihayaRepositionAgent(BaseRepositionAgent):
             
             begin_episode = last_time_train_epoch + 1
             self.algo.load(MODEL_REPOSITION_SAVE_DIR,last_time_train_epoch)
-            print_with_time(f'从{MODEL_REPOSITION_SAVE_DIR}加载REPOSITION模型Chihaya参数，最后训练轮次为{last_time_train_epoch}，本次从第{begin_episode}轮开始训练/测试')
+            # print_with_time(f'从{MODEL_REPOSITION_SAVE_DIR}加载REPOSITION模型Chihaya参数，最后训练轮次为{last_time_train_epoch}，本次从第{begin_episode}轮开始训练/测试')
             
             
         return begin_episode

@@ -1,5 +1,4 @@
 import torch
-from network.match_net import *
 from parameter import *
 import numpy as np
 from toolkit.time import *
@@ -25,7 +24,8 @@ class REINFORCE:
         
         
         
-        torch.compile(self.policy_net)
+        # The original call discarded torch.compile's return value and causes
+        # platform-specific compiler/encoding failures on Windows.
         
         
         self.optimizer = torch.optim.Adam(self.policy_net.parameters(),
@@ -123,7 +123,7 @@ class REINFORCE:
         self.policy_net.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         
-        print_with_time(f"从{path}加载模型")
+        print_with_time(f"Model loaded from {path}") # 从{path}加载模型
         
         
 '''

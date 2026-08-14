@@ -56,21 +56,8 @@ class HarvesterTankerCorporationEnvironment:
         
         
         # 训练和测试采用不同的数据集
-        if self.train_mode or USE_TRAIN_DATA_FOR_TEST:
-            if DATASET_ID ==1:
-            
-                self.dataset = TankerDataSetV3(r'XXX1/train.csv')
-                
-            elif DATASET_ID == 2:
-                self.dataset = TankerDataSetV3(r'XXX2/train.csv') 
-            
-        else:
-            if DATASET_ID ==1:
-            
-                self.dataset = TankerDataSetV3(r'XXX1/test.csv')
-                
-            elif DATASET_ID == 2:
-                self.dataset = TankerDataSetV3(r'XXX2/test.csv')
+        split = 'train.csv' if (self.train_mode or USE_TRAIN_DATA_FOR_TEST) else 'test.csv'
+        self.dataset = TankerDataSetV3(os.path.join(DATA_DIR, split))
             
             
             
@@ -80,8 +67,8 @@ class HarvesterTankerCorporationEnvironment:
         self.complete_region.make_working_regions(WORKING_AREAS)
         
         self.total_day_num_of_data = len(self.dataset.records_data)
-        print_with_time('总共有{}天的数据'.format(self.total_day_num_of_data))
-        print_with_time(f'当前使用的训练设备是{DEVICE}')
+        print_with_time('We are using {} days of data'.format(self.total_day_num_of_data)) #总共有{}天的数据
+        print_with_time(f'We are using {DEVICE} as our training device') #当前使用的训练设备是{}
         
         self.big_env_tanker_fuel_consumption =0.0
         self.big_env_add_fuel_amount =0.0
@@ -111,7 +98,9 @@ class HarvesterTankerCorporationEnvironment:
         if self.threshold_sample_method=='fix_half':
             return
         elif self.threshold_sample_method=='gaussian':
-            new_threshold = sample_gaussian_with_clipping()
+            # sample_gaussian_with_clipping defaults to a length-one array;
+            # the per-harvester threshold slot is scalar.
+            new_threshold = float(sample_gaussian_with_clipping()[0])
             self.harvester_fuel_threshold[hid]=new_threshold*FUEL_CAPACITY
         
     def resample_threshold_all_harvesters(self):
@@ -261,7 +250,7 @@ class HarvesterTankerCorporationEnvironment:
         self.add_fuel_num = 0 # 加油次数
         
         
-        print_with_time('环境初始化完成')
+        print_with_time('Initialization complete') #环境初始化完成
         # print('农机请求状态  维度,类型',harvester_request_status.shape,harvester_request_status.dtype)
         # print('农机剩余油量  维度,类型',harvester_remaining_fuel.shape,harvester_remaining_fuel.dtype)
         # print('农机等待时间步数  维度,类型',harvester_waiting_step.shape,harvester_waiting_step.dtype)
@@ -286,7 +275,7 @@ class HarvesterTankerCorporationEnvironment:
         
         metric = W_S*self.total_add_fuel_amount - W_C*self.total_tanker_fuel_consumption - W_WAITING*waiting_time
         
-        print_with_time(f'今日指标值 {metric}')
+        print_with_time(f'Today\'s metric value: {metric}') #今日指标值
         print_with_time(f'reward = {metric}')
         # 这里存储的是某个数据集上的所有天数的结果
         # self.big_env_tanker_fuel_consumption += self.total_tanker_fuel_consumption 
@@ -326,27 +315,26 @@ class HarvesterTankerCorporationEnvironment:
                 # print_with_time(f'第{i+1}次测试数据集日均农机等待时间总和：{w}分钟')
                 # print_with_time(f'第{i+1}次测试总奖励函数值：{r1}-{r2}-{r3}={r1 - r2 - r3}')
             
-            print_with_time(f'{self.total_day_num_of_data}天测试结果指标列表：{metric_list}')
+            print_with_time(f'{self.total_day_num_of_data} Test Results: {metric_list}') # 天测试结果指标列表
             miu,sigma = calculate_mean_std(metric_list)
             
-            print_with_time(f'均值：{miu}，标准差：{sigma}')
+            print_with_time(f'Mean：{miu}，Sigma：{sigma}') # 均值：{miu}，标准差：{sigma}
             
             
             s = sum(self.add_fuel_amount_list)/nums
             c = sum(self.tanker_fuel_consumption_list)/nums
             waiting = sum(self.harvester_waiting_step_list)/nums
             
-            print_with_time(f'数据集日均农机加油量：{s}')
-            print_with_time(f'数据集日均油罐车油耗：{c}')
-            print_with_time(f'数据集日均农机等待时间总和：{waiting}分钟')
+            print_with_time(f'Daily Average Fuel Added: {s}') # 数据集日均农机加油量：
+            print_with_time(f'Daily Average Tanker Fuel Consumption: {c}')
+            print_with_time(f'Daily Average Harvester Waiting Time: {waiting} minutes')
             
             
             r1 = W_S*s
             r2 = W_C*c
             r3 = W_WAITING*waiting
             
-            print_with_time(f'总奖励函数值：{r1}-{r2}-{r3}={r1-r2-r3}')
-            
+            print_with_time(f'Total Reward Function Value: {r1}-{r2}-{r3}={r1-r2-r3}')
             
             
             return r1-r2-r3

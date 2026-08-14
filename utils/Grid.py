@@ -9,7 +9,7 @@ import os
 import sys
 
 from utils.SpatialCompute import Point, haversine_distance
-from config import *
+from parameter import *
 
 
 class Grid:

@@ -31,7 +31,7 @@ from parameter import *
 # 在农田区域，加油车移动速度慢，1min只能移动0.2个格子
 # 在非农田区域，加油车移动速度快，1min能移动1个格子（速度是5倍）
 
-print_with_time('-----------------程序运行参数-------------------')
+print_with_time('-----------------Start-------------------') # 程序运行参数
 print_with_time(args)
 
 
@@ -111,25 +111,23 @@ elif REPOSITION_TRAIN_MODE:
 
 
 
-print_with_time('-----------------程序运行模式-------------------')
+print_with_time('-----------------Execution Mode-------------------') # 程序运行模式
 
 
-print_with_time('订单分配方法：'+ DISPATCH_METHOD)
-print_with_time('重定位方法：'+ REPOSITION_METHOD)
-
-
+print_with_time('Dispatch Method: ' + DISPATCH_METHOD) # 订单分配方法
+print_with_time('REPOSITION_METHOD: '+ REPOSITION_METHOD) # 重定位方法
 
 if REPOSITION_TRAIN_MODE:
     if DISPATCH_TRAIN_MODE:
-        print_with_time('重定位-订单分配联合训练')
+        print_with_time('Integrated Train for REPOSITION and DISPATCH') # 重定位-订单分配联合训练
     else:
-        print_with_time('重定位训练-订单分配测试模式')
+        print_with_time('REPOSITION Training - DISPATCH Testing Mode') # 重定位训练-订单分配测试模式
 else:
     if DISPATCH_TRAIN_MODE:
-        print_with_time('重定位测试-订单分配训练模式')
+        print_with_time('REPOSITION Testing - DISPATCH Training Mode') # 重定位测试-订单分配训练模式
     else:
         # 双测试模式
-        print_with_time('重定位测试-订单分配测试模式')
+        print_with_time('REPOSITION Testing - DISPATCH Testing Mode') # 重定位测试-订单分配测试模式
         begin_episode = 0
 
 print_with_time('----------------------------------------------')
@@ -165,7 +163,7 @@ for i_e in range(begin_episode,episode_num*test_num):
     
     
     if REPOSITION_TRAIN_MODE or DISPATCH_TRAIN_MODE:
-        print_with_time(f'训练模式，episode {i_e}')
+        print_with_time(f'Training，episode {i_e}') # 训练模式，episode {i_e}
         env.reset()
         env.resample_threshold_all_harvesters()
         
@@ -176,7 +174,7 @@ for i_e in range(begin_episode,episode_num*test_num):
             day_idx = KEEP_VISUALIZATION_DATA_DAY_IDX
         
         test_idx = i_e // env.total_day_num_of_data
-        print_with_time(f'测试模式，第 {test_idx} 轮，第 {day_idx} 天')
+        print_with_time(f'Testing，episode {test_idx} - {day_idx}') # 测试模式，第 {test_idx} 轮，第 {day_idx} 天
         env.reset(day_idx)
         np.random.seed(SEED + test_idx)
         env.resample_threshold_all_harvesters()
@@ -308,9 +306,9 @@ for i_e in range(begin_episode,episode_num*test_num):
                     
                     
                     if hid not in need_add_fuel_harvesters:
-                        print_with_time(f'警告：农机ID{hid}不在need_add_fuel_harvesters列表中')
+                        print_with_time(f'Warning: Harvester ID {hid} is not in the need_add_fuel_harvesters list') # 警告：农机ID{hid}不在need_add_fuel_harvesters列表中
                     
-                    print_with_time(f'时间步{i_step}，本次派遣动作：加油车ID {tid} ->农机ID {hid}')
+                    print_with_time(f'{i_step} step : RF{tid}-> AM{hid}') # 时间步{i_step}，本次派遣动作：加油车ID {tid} ->农机ID {hid}
                     env.add_refuel_target_given_tid_hid(tid,hid)
           
         
@@ -401,12 +399,12 @@ for i_e in range(begin_episode,episode_num*test_num):
     
     env.cal_metric_and_save()
 
-    print_with_time(f'加油总量 {env.total_add_fuel_amount} L')
-    print_with_time('本日油罐车总油耗：',env.total_tanker_fuel_consumption)
-    print_with_time(f'今日加油次数 {env.add_fuel_num} 次')
-    print_with_time(f'农机工作状态{env.harvester_working_status}')
-    print_with_time(f'缺油等待时间{np.sum(env.harvester_waiting_step)}')
-    print_with_time(f'今日idle可用加油车总时间步数 {idle_available_count} 个时间步')
+    print_with_time(f'Total Fuel Added: {env.total_add_fuel_amount} L')
+    print_with_time(f'Total Fuel Consumption of Tankers: {env.total_tanker_fuel_consumption}')
+    print_with_time(f'Number of Fueling Operations Today: {env.add_fuel_num}')
+    print_with_time(f'Harvester Working Status: {env.harvester_working_status}')
+    print_with_time(f'Waiting Time for Low Fuel: {np.sum(env.harvester_waiting_step)}')
+    print_with_time(f'Total Time Steps Available for Idle Tankers Today: {idle_available_count}')
 
     
     dispatch_agent.after_every_episode(env)
@@ -420,7 +418,7 @@ for i_e in range(begin_episode,episode_num*test_num):
 
 
 if KEEP_VISUALIZATION_DATA_DAY_IDX!=-1:
-    prefix = './本地测试/NEWMETHOD/'
+    prefix = './outputs/'
     np.save(prefix+'check_harvester_loc.npy',check_harvester_loc)
     np.save(prefix+'check_tanker_loc.npy',check_tanker_loc)
     np.save(prefix+'check_harvester_still.npy',check_harvester_still)
@@ -428,7 +426,7 @@ if KEEP_VISUALIZATION_DATA_DAY_IDX!=-1:
 
 
 
-print_with_time('训练/测试结束')
+print_with_time('-----------------End-------------------') # 训练/测试结束
 
 
 print_with_time(env.cal_total_object(test_num*episode_num))

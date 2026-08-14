@@ -1,6 +1,6 @@
 import torch
 import math
-from config import *
+from parameter import *
 
 
 class Point:

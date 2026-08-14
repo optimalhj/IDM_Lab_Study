@@ -12,6 +12,24 @@ Simply put, you need the trajectories of agricultural machinery and organize the
 - **t** denotes the time steps divided within a day;
 - **pos** denotes the position of the agricultural machinery at the corresponding time step. In our original implementation, only the first value of this dimension was adopted, which represents the index in the grid world and can be converted into column and row coordinates in our code.
 
+#### Preparing the bundled public XLSX files
+
+The bundled public archive contains one GPS recording per machine, while this
+implementation expects a fixed number of machines per simulated day.  Create a
+runnable train/test split with:
+
+```shell
+python ./preprocess_trajectory_data.py
+```
+
+This writes `data/mobref/train.csv`, `data/mobref/test.csv`, and metadata.  The
+GPS positions are normalised into the environment's grid so the public dataset
+can exercise the code path.  Because the source recordings span distinct real
+fields, this output must not be interpreted as geographically faithful paper
+results.  Supply a co-located, same-day fleet dataset for scientific evaluation.
+Choose the input archive and adjust output settings in the configuration block
+at the top of `preprocess_trajectory_data.py`.
+
 ### Parameter
 
 You can control the parameters via the file **`parameter.py`**, including certain environment parameters, algorithm parameters and other related configurations. For the macro variables marked in uppercase defined in this file, we have adopted a reflection mechanism, which can automatically add these variables as arguments. In other words, any parameter in the file can be controlled through command line arguments.
