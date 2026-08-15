@@ -17,3 +17,17 @@ __pycache__/
 
 
 ./data
+data/public_trajectory_dataset/corn_0.zip
+data/public_trajectory_dataset/corn_1.zip
+data/public_trajectory_dataset/corn_2.zip
+data/public_trajectory_dataset/corn_3.zip
+data/public_trajectory_dataset/corn_4.zip
+data/public_trajectory_dataset/corn_5.zip
+data/public_trajectory_dataset/data_split.zip
+data/public_trajectory_dataset/paddy.zip
+data/public_trajectory_dataset/README.md
+data/public_trajectory_dataset/wheat1_0.zip
+data/public_trajectory_dataset/wheat1_1.zip
+data/public_trajectory_dataset/wheat1_2.zip
+data/public_trajectory_dataset/wheat1_3.zip
+data/public_trajectory_dataset/wheat1_4.zip
