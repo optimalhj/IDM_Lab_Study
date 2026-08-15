@@ -167,18 +167,13 @@ def crossover(points, os_vector, ms_vector, pair):
     return new_os_vector, new_ms_vector
 
 def evolution_guided(process, setup, ini_set, pops):
-    # EGP (진화 유도) - 기존 로직 유지
-    winner_pops, loser_pops = pops[:(params["Np1"] + 1)//2], pops[params["Np1"]//2:]
-    new_pops = []
+    winner_pops, loser_pops, new_pops = pops[:(params["Np1"] + 1)//2], pops[params["Np1"]//2:], []
     for seq, _, _, _ in winner_pops:
         os_vector, ms_vector = seq[0].copy(), seq[1].copy()
         way = rd.randint(3)
-        if way == 0:
-            result = swap(os_vector, ms_vector)
-        elif way == 1:
-            result = reverse(os_vector, ms_vector)
-        elif way == 2:
-            result = reassign(ini_set, os_vector, ms_vector)
+        if way == 0: result = swap(os_vector, ms_vector)
+        elif way == 1: result = reverse(os_vector, ms_vector)
+        elif way == 2: result = reassign(ini_set, os_vector, ms_vector)
         else: result = [] # Do not reach
         new_pops.append(decoding(process, setup, ini_set, result))
 
@@ -199,14 +194,12 @@ def evolution_guided(process, setup, ini_set, pops):
 # 3. KDP (지식 기반 집단) - DQN 연동
 # =====================================================================
 def get_state_vector(os_vector, ms_vector):
-    """ 문자열인 Job1, M1 등을 신경망이 인식할 수 있게 정수(int) 배열로 변환하여 Concatenation """
     state = []
     for j in os_vector: state.append(int(j.replace("Job", "")))
     for m in ms_vector: state.append(int(m.replace("M", "")))
     return state
 
 def knowledge_driven(process, setup, ini_set, kdp_pops, q_net, memory, epsilon):
-    """ DQN이 kdp_pops(지식 기반 집단)의 상태를 보고 탐색 오퍼레이터를 선택하여 진화 """
     new_pops = []
 
     for pop in kdp_pops:
@@ -217,8 +210,10 @@ def knowledge_driven(process, setup, ini_set, kdp_pops, q_net, memory, epsilon):
 
         for pair in [pop_tmp[0] for pop_tmp in kdp_pops if pop_tmp[0] != pop[0]]:
         # 2. Action(행동) 선택 - 입실론 탐욕 전략
-            if rd.random() < epsilon: action = rd.randint(6)  # 탐험
-            else: action = q_net(state_tensor).argmax().item() # Q-Network 예측
+            if rd.random() < epsilon:
+                action = rd.randint(6)  # 탐험
+            else:
+                with torch.no_grad(): action = q_net(state_tensor).argmax().item() # Q-Network 예측
             if len(os_vector) <= 3 and action == 5: action = 4
             if len(os_vector) <= 2 and action == 4: action = 3
 
