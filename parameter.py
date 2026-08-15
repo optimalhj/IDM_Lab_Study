@@ -119,7 +119,7 @@ DATASET_ID = 1
 
 # Directory created by preprocess_trajectory_data.py.  It may be overridden
 # from the command line with --data_dir.
-DATA_DIR = 'data/mobref'
+DATA_DIR = 'data'
 
 # 指定要保存哪一天的训练数据，-1代表不保存。指定某一天后，仅在该天进行测试，可视化数据
 KEEP_VISUALIZATION_DATA_DAY_IDX = -1

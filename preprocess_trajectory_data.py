@@ -9,21 +9,21 @@ from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
-
+from parameter import DATA_DIR
 
 # -----------------------------------------------------------------------------
 # Settings: edit these values before running this file.
 # -----------------------------------------------------------------------------
 # paddy has 100 recordings, enough for the default 25-machine train/test split.
-CHOOSE_MACHINE = [0]  # 0-5: corn, 6: paddy, 7-11: wheat1
+CHOOSE_MACHINE = [0, 1, 2, 3, 4, 5]  # 0-5: corn, 6: paddy, 7-11: wheat1
 MACHINES = {
     0: "corn_0", 1: "corn_1", 2: "corn_2", 3: "corn_3", 4: "corn_4",
     5: "corn_5", 6: "paddy", 7: "wheat1_0", 8: "wheat1_1",
     9: "wheat1_2", 10: "wheat1_3", 11: "wheat1_4"}
 
 # To combine sources, put more ZIP paths in this list.
-ARCHIVES = [Path("data") / f"public_trajectory_dataset"/ f"{MACHINES[machine_id]}.zip" for machine_id in CHOOSE_MACHINE]
-OUTPUT_DIR = Path("data/mobref")
+ARCHIVES = [Path(DATA_DIR) / f"public_trajectory_dataset"/ f"{MACHINES[machine_id]}.zip" for machine_id in CHOOSE_MACHINE]
+OUTPUT_DIR = Path(DATA_DIR)
 MACHINES_PER_DAY = 25
 GRID_ROWS = 155
 GRID_COLS = 185

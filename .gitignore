@@ -31,3 +31,13 @@ data/public_trajectory_dataset/wheat1_1.zip
 data/public_trajectory_dataset/wheat1_2.zip
 data/public_trajectory_dataset/wheat1_3.zip
 data/public_trajectory_dataset/wheat1_4.zip
+data/metadata.json
+data/test.csv
+data/train.csv
+
+.idea/.gitignore
+.idea/MobRef_GitHub.iml
+.idea/modules.xml
+.idea/vcs.xml
+.idea/inspectionProfiles/profiles_settings.xml
+.idea/inspectionProfiles/Project_Default.xml
