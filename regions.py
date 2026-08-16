@@ -1,4 +1,4 @@
-from parameter import LAT_PER_METER, LNG_PER_METER
+from parameter import LAT_PER_METER, LNG_PER_METER, ROW_NUMS, COL_NUMS
 
 
 
@@ -26,8 +26,8 @@ WORKING_AREAS = [
 
 
 
-N_ROWS = 155
-N_COLS = 185
+N_ROWS = ROW_NUMS
+N_COLS = COL_NUMS
     
 
 
