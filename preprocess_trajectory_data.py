@@ -9,7 +9,8 @@ from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
-from parameter import DATA_DIR
+from parameter import DATA_DIR, SEED, MACHINES_PER_DAY, TEST_RATIO
+from regions import N_ROWS, N_COLS
 
 # -----------------------------------------------------------------------------
 # Settings: edit these values before running this file.
@@ -24,11 +25,8 @@ MACHINES = {
 # To combine sources, put more ZIP paths in this list.
 ARCHIVES = [Path(DATA_DIR) / f"public_trajectory_dataset"/ f"{MACHINES[machine_id]}.zip" for machine_id in CHOOSE_MACHINE]
 OUTPUT_DIR = Path(DATA_DIR)
-MACHINES_PER_DAY = 25
-GRID_ROWS = 155
-GRID_COLS = 185
-TEST_RATIO = 0.25
-SEED = 2333
+GRID_ROWS = N_ROWS
+GRID_COLS = N_COLS
 
 # Unicode escapes keep the Chinese Excel headers portable on Windows.
 TIME_COLUMNS = ("time", "\u65f6\u95f4")
@@ -38,8 +36,7 @@ LNG_COLUMNS = ("longitude", "\u7ecf\u5ea6")
 
 def find_column(frame, candidates):
     for name in candidates:
-        if name in frame.columns:
-            return name
+        if name in frame.columns: return name
     raise ValueError(f"Expected one of {candidates}; found {list(frame.columns)}")
 
 
@@ -86,15 +83,13 @@ def write_csv(path, episodes):
 
 def main():
 
-    recordings = []
-    seen = set()
+    recordings, seen = [], set()
 
     for archive in ARCHIVES:
         with ZipFile(archive) as bundle:
             for workbook in sorted(name for name in bundle.namelist() if name.lower().endswith(".xlsx")):
                 machine_id = Path(workbook).stem
-                if machine_id in seen:
-                    machine_id = f"{archive.stem}_{machine_id}"
+                if machine_id in seen: machine_id = f"{archive.stem}_{machine_id}"
                 seen.add(machine_id)
 
                 raw = pd.read_excel(BytesIO(bundle.read(workbook)))
