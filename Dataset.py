@@ -81,7 +81,6 @@ class TankerDataSetV3(Dataset):
     def sample(self):
         return random.choice(self.did_data), random.choice(self.records_data)
 
-
-
-
-
+if __name__ == "__main__":
+    from parameter import DATA_DIR
+    TankerDataSetV3(os.path.join(DATA_DIR, "train.csv"))

@@ -139,14 +139,7 @@ print_with_time('----------------------------------------------')
 for i_e in range(begin_episode,episode_num*test_num):  
 
 # 每个episode开头---------------------------------------------------------------
-
-
-
-
-
-    
-    
-    
+  
     idle_available_count = 0
     
     dispatch_agent.before_every_episode()

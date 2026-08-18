@@ -58,11 +58,7 @@ class HarvesterTankerCorporationEnvironment:
         # 训练和测试采用不同的数据集
         split = 'train.csv' if (self.train_mode or USE_TRAIN_DATA_FOR_TEST) else 'test.csv'
         self.dataset = TankerDataSetV3(os.path.join(DATA_DIR, split))
-            
-            
-            
-            
-            
+                
         self.complete_region = CompleteRegion(COMPLETE_MIN_LAT, COMPLETE_MIN_LNG, N_ROWS, N_COLS, 0.5, 0.5, load_path=None, use_general_distance=True)
         self.complete_region.make_working_regions(WORKING_AREAS)
         

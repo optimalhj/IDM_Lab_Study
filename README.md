@@ -10,6 +10,36 @@ This is the source code for the paper:
 
 ### Dataset
 
+The first you have to do is to download dataset and install into this project. We will use agricultural dataset from this link(https://github.com/Agribigdata/public_trajectory_dataset)
+
+Download the dataset in **`ZIP file`** format, and save **`extracted`** file with the name "public_trajectory_dataset_main" in the folder named "data"
+
+The directory structure should be set like this.
+
+```
+MAIN_FOLDER
+
+   |- agent
+   |- model
+   |- network
+   |- RLAlgo
+   |- toolkit
+   |- utils
+   |- README.md
+   |- parameters
+   ........
+   
+   |- data
+      |- public_trajectory_dataset_main      <- The location of Dataset should be here
+            |- corn_0.zip
+            |- corn_1.zip
+            |- corn_2.zip
+            |- corn_3.zip
+            ......
+            |- wheat1_3.zip
+            |- wheat1_4.zip
+```
+
 For the data preprocessing and loading, please refer **`Dataset.py`**.
 
 Simply put, you need the trajectories of agricultural machinery and organize the data of each day into the format of dimension **[n, t, pos]**, where

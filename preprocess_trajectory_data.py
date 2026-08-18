@@ -23,7 +23,7 @@ MACHINES = {
     9: "wheat1_2", 10: "wheat1_3", 11: "wheat1_4"}
 
 # To combine sources, put more ZIP paths in this list.
-ARCHIVES = [Path(DATA_DIR) / f"public_trajectory_dataset"/ f"{MACHINES[machine_id]}.zip" for machine_id in CHOOSE_MACHINE]
+ARCHIVES = [Path(DATA_DIR) / f"public_trajectory_dataset_main"/ f"{MACHINES[machine_id]}.zip" for machine_id in CHOOSE_MACHINE]
 OUTPUT_DIR = Path(DATA_DIR)
 GRID_ROWS = N_ROWS
 GRID_COLS = N_COLS
