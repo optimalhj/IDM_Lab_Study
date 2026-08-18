@@ -159,10 +159,8 @@ class Grid:
         self.m_per_cell_lng = km_per_cell_lng * 1000.
 
     def center(self, idx):
-        lat = (self.min_lat + LAT_PER_METER * self.m_per_cell_lat / 2) + LAT_PER_METER * (self.row_index(
-            idx) - 1) * self.m_per_cell_lat
-        lng = (self.min_lng + LNG_PER_METER * self.m_per_cell_lng / 2) + LNG_PER_METER * (self.col_index(
-            idx) - 1) * self.m_per_cell_lng
+        lat = (self.min_lat + LAT_PER_METER * self.m_per_cell_lat / 2) + LAT_PER_METER * (self.row_index(idx) - 1) * self.m_per_cell_lat
+        lng = (self.min_lng + LNG_PER_METER * self.m_per_cell_lng / 2) + LNG_PER_METER * (self.col_index(idx) - 1) * self.m_per_cell_lng
         return lat, lng
 
     def row_index(self, idx):
@@ -421,6 +419,6 @@ class Grid:
 
 
 if __name__ == '__main__':
-    grid = Grid(MIN_LAT, MIN_LNG, 160, 198, 0.5, 0.5, use_real_roadnetwork=False)
+    grid = Grid(36.04635058, 116.14499324, ROW_NUMS, COL_NUMS, 0.5, 0.5, use_real_roadnetwork=False)
     print(grid.distance(1, 2))
     # grid.read_real_roadnetwork_distance('./real_dis_mat_bicycling.pt')

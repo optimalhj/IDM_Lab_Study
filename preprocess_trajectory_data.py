@@ -9,7 +9,7 @@ from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
-from parameter import DATA_DIR, SEED, MACHINES_PER_DAY, TEST_RATIO
+from parameter import DATA_DIR, SEED, NUM_HARVESTERS, TEST_RATIO
 from regions import N_ROWS, N_COLS
 
 # -----------------------------------------------------------------------------
@@ -109,8 +109,8 @@ def main():
     mapped = [(machine_id, grid_indices(frame, bounds)) for machine_id, frame in prepared]
 
     random.Random(SEED).shuffle(mapped)
-    episodes = [mapped[index:index + MACHINES_PER_DAY] for index in range(0, len(mapped), MACHINES_PER_DAY)]
-    episodes = [episode for episode in episodes if len(episode) == MACHINES_PER_DAY]
+    episodes = [mapped[index:index + NUM_HARVESTERS] for index in range(0, len(mapped), NUM_HARVESTERS)]
+    episodes = [episode for episode in episodes if len(episode) == NUM_HARVESTERS]
     test_count = max(1, round(len(episodes) * TEST_RATIO))
     train, test = episodes[:-test_count], episodes[-test_count:]
 
@@ -120,7 +120,7 @@ def main():
         "archives": [str(path) for path in ARCHIVES],
         "train_days": len(train),
         "test_days": len(test),
-        "machines_per_day": MACHINES_PER_DAY,
+        "machines_per_day": NUM_HARVESTERS,
         "grid": {"rows": GRID_ROWS, "cols": GRID_COLS},
         "gps_bounds": {"min_lat": bounds[0], "max_lat": bounds[1], "min_lng": bounds[2], "max_lng": bounds[3]},
     }

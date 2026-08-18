@@ -918,3 +918,6 @@ class HarvesterTankerCorporationEnvironment:
             
             
         return this_move_fuel_comsumption
+
+if __name__ == '__main__':
+    env = HarvesterTankerCorporationEnvironment()

@@ -130,11 +130,9 @@ USE_TRAIN_DATA_FOR_TEST = False
 MODEL_SAVE_DIR = 'model/EasyMatch'
 
 TEST_RATIO = 0.25
-MACHINES_PER_DAY = 25
+
+
 # 跟POLAR相关
-
-
-
 
 import argparse
 import inspect
