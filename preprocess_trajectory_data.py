@@ -16,7 +16,7 @@ from regions import N_ROWS, N_COLS
 # Settings: edit these values before running this file.
 # -----------------------------------------------------------------------------
 # paddy has 100 recordings, enough for the default 25-machine train/test split.
-CHOOSE_MACHINE = [0, 1, 2, 3, 4, 5]  # 0-5: corn, 6: paddy, 7-11: wheat1
+CHOOSE_MACHINE = [0]  # 0-5: corn, 6: paddy, 7-11: wheat1
 MACHINES = {
     0: "corn_0", 1: "corn_1", 2: "corn_2", 3: "corn_3", 4: "corn_4",
     5: "corn_5", 6: "paddy", 7: "wheat1_0", 8: "wheat1_1",

@@ -6,8 +6,7 @@ from toolkit.time import *
 from network.high_match_net import MatchingModel
 
 class REINFORCE:
-    def __init__(self, method = 'EasyMatch', hidden_dim=10, action_dim=10, learning_rate=LR, gamma=GAMMA,
-                 device=DEVICE):
+    def __init__(self, method = 'EasyMatch', hidden_dim=10, action_dim=10, learning_rate=LR, gamma=GAMMA, device=DEVICE):
         # self.policy_net = PolicyNet(state_dim, hidden_dim,action_dim).to(device)
         
         # self.policy_net = MatchingNet(state_dim, [64]).to(device)
@@ -28,8 +27,7 @@ class REINFORCE:
         # platform-specific compiler/encoding failures on Windows.
         
         
-        self.optimizer = torch.optim.Adam(self.policy_net.parameters(),
-                                          lr=learning_rate)  # 使用Adam优化器
+        self.optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=learning_rate)  # 使用Adam优化器
         self.gamma = gamma  # 折扣因子
         self.device = device
         

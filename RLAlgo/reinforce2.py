@@ -7,8 +7,7 @@ from network.harvester_attention_rev import HarvesterAttention
 
 
 class REINFORCE2:
-    def __init__(self, network_type = 0,state_dim=2333, hidden_dim=10, action_dim=10, learning_rate=LR, gamma=GAMMA,
-                 device=DEVICE):
+    def __init__(self, network_type = 0,state_dim=2333, hidden_dim=10, action_dim=10, learning_rate=LR, gamma=GAMMA, device=DEVICE):
         # self.policy_net = PolicyNet(state_dim, hidden_dim,action_dim).to(device)
         
         # self.policy_net = MatchingNet(state_dim, [64]).to(device)
@@ -24,8 +23,7 @@ class REINFORCE2:
         
         # Keep eager mode: the original compile result was not assigned.
         
-        self.optimizer = torch.optim.Adam(self.policy_net.parameters(),
-                                          lr=learning_rate)  # 使用Adam优化器
+        self.optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=learning_rate)  # 使用Adam优化器
         self.gamma = gamma  # 折扣因子
         self.device = device
         
