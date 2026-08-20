@@ -26,7 +26,6 @@ def make_daily_trajectory(frame):
     sampled.loc[first:last] = sampled.loc[first:last].ffill().bfill()
     return sampled
 
-
 def grid_indices(frame, bounds, row_nums, col_nums):
     min_lat, max_lat, min_lng, max_lng = bounds
     indices = np.zeros((len(frame), 2), dtype=int)
@@ -63,8 +62,8 @@ def find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_
     if json_path.exists():
         with open(json_path, "r", encoding="utf-8") as f:
             prior_data = json.load(f)
-            if prior_data == metadata:
-                return Path(output_dir)
+            if all(prior_data[key] == metadata[key] for key in metadata.keys()):
+                return Path(output_dir), prior_data["range"]
 
     machines = {0: "corn_0", 1: "corn_1", 2: "corn_2", 3: "corn_3", 4: "corn_4", 5: "corn_5", 6: "paddy", 7: "wheat1_0", 8: "wheat1_1", 9: "wheat1_2", 10: "wheat1_3", 11: "wheat1_4"}
 
@@ -91,6 +90,7 @@ def find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_
     all_lat = pd.concat([frame["lat"] for frame in prepared.values()]).dropna()
     all_lng = pd.concat([frame["lng"] for frame in prepared.values()]).dropna()
     bounds = (float(all_lat.min()), float(all_lat.max()), float(all_lng.min()), float(all_lng.max()))
+    metadata["range"] = {"lat_min": bounds[0], "lat_max": bounds[1], "lng_min": bounds[2], "lng_max": bounds[3]}
     mapped = {machine_id: grid_indices(prepared[machine_id], bounds, row_nums, col_nums) for machine_id in prepared.keys()}
     # for machine_id in mapped.keys():
     #     print(machine_id)
@@ -112,7 +112,7 @@ def find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, ensure_ascii=False, indent=4)
 
-    return Path(output_dir)
+    return Path(output_dir), metadata["range"]
 
 def main():
     data_dir = "C:\\Users\\USER\\Documents\\MobRef_GitHub\\data"

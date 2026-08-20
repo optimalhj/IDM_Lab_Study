@@ -5,11 +5,13 @@ import torch.optim as optim
 
 from collections import deque
 import numpy as np
+import pandas as pd
 import random
 import math
 from copy import deepcopy
 
 from dataset import find_dataset
+from olds.Predictive_Mobile_Refueling_for_Agricultural_Machines import InitialStudyRegion
 
 class CentralRequestDispatcher(nn.Module):
     def __init__(self, in_dim_crd, hidden1_dim_crd, hidden2_dim_crd, hidden3_dim_crd, hidden4_dim_crd, out_dim_crd):
@@ -283,8 +285,7 @@ class RT:
     def stop_assign(self, contact=False):
         self.assignment_state = 0
         self.destination = None
-        if contact:
-            self.refueling = False
+        if contact: self.refueling = False
 
     def tks_move(self, action, study_region, remain=0):
         if action == 0 and self.location[0] != 1:
@@ -307,7 +308,7 @@ class AM:
 
         self.request = -1
         self.w_waiting_st = 0
-        self.accumulated_working_time = 0
+        self.accumulated_working_time = -1
         self.last_refueling_time = 0
         self.refueling_amount = 0
         self.refueling = False
@@ -365,7 +366,7 @@ def main():
     choose_machines = [0]  # 0-5: corn, 6: paddy, 7-11: wheat1
     num_am_day = 4
 
-    saved_path = find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_am_day)
+    saved_path, range_info = find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_am_day)
 
     platform_x = 50
     platform_y = 50
@@ -377,7 +378,7 @@ def main():
     fuel_mean = 40
     fuel_std = 5
 
-    params1 = {}
+    params1 = {"request_mean": request_mean, "request_std": request_std, "fuel_mean": fuel_mean, "fuel_std": fuel_std}
     params2 = {"epoch": 5, "w_d": 0.4, "w_r": 0.6, "time_period": 300,
               "in_dim_crd": 16, "hidden1_dim_crd": 64, "hidden2_dim_crd": 32, "hidden3_dim_crd": 16, "hidden4_dim_crd": 8, "out_dim_crd": 1,
               "in_dim_trs": 11, "embed_dim_trs": 16, "num_heads_dim_trs": 16, "hidden1_dim_trs": 2, "hidden2_dim_trs": 4, "out_dim_trs": 5,
@@ -387,6 +388,32 @@ def main():
     refueling_tankers = {f"rt{i+1}": [random.randint(2, 3), random.randint(3, 5), random.randint(5, 8)] for i in range(random.randint(min_rt, max_rt))}
     study_region = {x: {y: 0 for y in range(1, col_nums + 1)} for x in range(1, row_nums + 1)}
 
+    working_areas = [# MIN_LAT, MAX_LAT, MIN_LNG, MAX_LNG
+                    (36.04635058, 36.06342458, 116.14499324, 116.17069701),
+                    (36.03839537, 36.14855579, 116.57486009, 116.62898196),
+                    (35.89408831, 35.98541373, 116.74336870, 116.80484081),
+                    (35.94852120, 36.04374426, 117.09726074, 117.20133489),
+                    (35.96993748, 35.99374381, 117.02397783, 117.04133797),
+                    (35.80146604, 35.81994942, 117.13927499, 117.17214827),
+                    (35.83013730, 35.91009813, 116.43981722, 116.56369568),
+                    (35.84135307, 35.90211380, 116.23802495, 116.34077893),
+                    (35.46585266, 35.49610145, 116.91805657, 116.94853584)]
+    working_areas = [(min_lat, max_lat, min_lng, max_lng) for min_lat, max_lat, min_lng, max_lng in working_areas if range_info["lat_min"] <= min_lat and max_lat <= range_info["lat_max"] and range_info["lng_min"] <= min_lng and max_lng <= range_info["lng_max"]]
+
+    print(range_info)
+    for min_lat, max_lat, min_lng, max_lng in working_areas:
+        lat_scale = max(range_info["lat_max"] - range_info["lat_min"], 1e-9) / row_nums
+        lng_scale = max(range_info["lng_max"] - range_info["lng_min"], 1e-9) / col_nums
+        min_row = (min_lat - range_info["lat_min"]) // lat_scale + 1
+        min_col = (min_lng - range_info["lng_min"]) // lng_scale + 1
+        max_row = (max_lat - range_info["lat_min"]) // lat_scale + 1
+        max_col = (max_lng - range_info["lng_min"]) // lng_scale + 1
+        for row in range(int(min_row), int(max_row) + 1):
+            for col in range(int(min_col), int(max_col) + 1):
+                study_region[col][row] = 1
+
+    region = InitialStudyRegion(row_nums, col_nums)
+    region.show(study_region)
     using_csv = "train" if dispatch_training or reposition_training else "test"
     start(refueling_tankers, study_region, platform, params1, params2, saved_path / f"{using_csv}.csv")
 

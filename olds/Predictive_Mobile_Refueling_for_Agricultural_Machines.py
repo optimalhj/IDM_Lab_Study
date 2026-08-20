@@ -407,7 +407,7 @@ class AM:
         else: return False
 
 class InitialStudyRegion:
-    def __init__(self, width, length, study_region):
+    def __init__(self, width, length):
         self.width = width
         self.length = length
         self.width_format, self.length_format, decent1, decent2 = 2, 1, 10, 10
@@ -440,7 +440,7 @@ def start(refueling_tankers, agricultural_machines, study_region, platform, para
     for am in agricultural_machines:
         speed, fuel, consuming_rate, request_fuel_rate = agricultural_machines[am]
         ams[am] = AM(width=width, length=length, platform=platform, speed=speed, fuel=fuel, consuming_rate=consuming_rate, request_fuel_rate=request_fuel_rate)
-    initial_study_region = InitialStudyRegion(width=width, length=length, study_region=study_region)
+    initial_study_region = InitialStudyRegion(width=width, length=length)
     return predictive_mobile_refuel(rts, ams, study_region, initial_study_region, params)
 
 def set_load(x, y, length, width, platform, tree_ratio, max_ratio, loads):
