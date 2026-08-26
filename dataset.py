@@ -38,6 +38,7 @@ def grid_indices(frame, bounds, row_nums, col_nums):
 
     indices[active.to_numpy(), 0] = row.clip(1, row_nums)
     indices[active.to_numpy(), 1] = col.clip(1, col_nums)
+
     return indices
 
 def write_csv(output_dir, episodes):
@@ -97,10 +98,11 @@ def find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_
     #     for row_info, col_info in mapped[machine_id]:
     #         print("\tRow :", round(row_info, 2), " Col :", round(col_info, 2))
 
-    seed = 2399
-    random.Random(seed).shuffle(list(mapped))
+    mapped_key = list(mapped)
+    seed = 2599
+    random.Random(seed).shuffle(mapped_key)
 
-    episodes = [[(machine_id, mapped[machine_id]) for machine_id in list(mapped)[idx:idx+num_am_day]] for idx in range(0, len(mapped), num_am_day)]
+    episodes = [[(machine_id, mapped[machine_id]) for machine_id in list(mapped_key)[idx:idx+num_am_day]] for idx in range(0, len(mapped), num_am_day)]
     working_per_day = [{machine_id: frame for machine_id, frame in episodes[day]} for day in range(len(episodes)) if len(episodes[day]) == num_am_day]
 
     test_count = max(1, round(len(working_per_day) * 0.25))
@@ -119,7 +121,7 @@ def main():
     output_dir = ".\\data"
     row_nums = 450
     col_nums = 550
-    choose_machines = [0, 3]  # 0-5: corn, 6: paddy, 7-11: wheat1
+    choose_machines = [0]  # 0-5: corn, 6: paddy, 7-11: wheat1
     nun_am_day = 4
     find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, nun_am_day)
 

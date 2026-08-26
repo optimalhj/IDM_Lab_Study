@@ -13,6 +13,8 @@ from copy import deepcopy
 from dataset import find_dataset
 from olds.Predictive_Mobile_Refueling_for_Agricultural_Machines import InitialStudyRegion
 
+am_additional = "corn_harvestor_"
+
 class CentralRequestDispatcher(nn.Module):
     def __init__(self, in_dim_crd, hidden1_dim_crd, hidden2_dim_crd, hidden3_dim_crd, hidden4_dim_crd, out_dim_crd):
         super(CentralRequestDispatcher, self).__init__()
@@ -88,13 +90,13 @@ def crd_transformer_encoder(rts, ams, t):
         rt_t = rt_id + current_location + assignment_state + intended_destination
 
         for am in ams:
-            am_id = [int(am.replace("am", ""))]
-            current_location = ams[am].location
+            am_id = [int(am.replace(am_additional, ""))]
+            current_location = [int(loc) for loc in ams[am].location()]
             historical_record = [ams[am].accumulated_working_time, ams[am].last_refueling_time, ams[am].refueling_amount]
             request_state = [ams[am].request]
             am_t = am_id + current_location + historical_record + request_state
 
-            total_path = abs(rts[rt].location[0] - ams[am].location[0]) + abs(rts[rt].location[1] - ams[am].location[1])
+            total_path = abs(rts[rt].location[0] - int(ams[am].location()[0])) + abs(rts[rt].location[1] - int(ams[am].location()[1]))
             extra_path = 0
             mi_t = [total_path, extra_path]
             batch = rt_t + am_t + mi_t + [t]
@@ -111,8 +113,8 @@ def tks_transformer_encoder(rts, ams, t):
 
     x, y = rts.location
     for am in ams:
-        am_id = [int(am.replace("am", ""))]
-        relative_location = [ams[am].location[0] - x, ams[am].location[1] - y]
+        am_id = [int(am.replace(am_additional, ""))]
+        relative_location = [int(ams[am].location()[0]) - x, int(ams[am].location()[1]) - y]
         historical_record = [ams[am].accumulated_working_time, ams[am].last_refueling_time, ams[am].refueling_amount]
         request_state = [ams[am].request]
         am_t_prime = am_id + relative_location + historical_record + request_state
@@ -147,44 +149,47 @@ def reward_calculator(rt, ams, w_d, geographical_distance):
 
     return potential
 
-def predictive_mobile_refuel(rts, ams, study_region, params):
-    (crd, crd_target) = [CentralRequestDispatcher(params["in_dim_crd"], params["hidden1_dim_crd"], params["hidden2_dim_crd"], params["hidden3_dim_crd"], params["hidden4_dim_crd"], params["out_dim_crd"]) for _ in range(2)]
-    (trs, trs_target) = [TankerRepositionScheduler(params["in_dim_trs"], params["embed_dim_trs"], params["num_heads_dim_trs"], params["hidden1_dim_trs"], params["hidden2_dim_trs"], params["out_dim_trs"], params["w_d"]) for _ in range(2)]
+def predictive_mobile_refuel(rts, ams_total, study_region, params, max_day):
+    crd = CentralRequestDispatcher(params["in_dim_crd"], params["hidden1_dim_crd"], params["hidden2_dim_crd"], params["hidden3_dim_crd"], params["hidden4_dim_crd"], params["out_dim_crd"])
+    crd_target = deepcopy(crd)
+    trs = {rt: TankerRepositionScheduler(params["in_dim_trs"], params["embed_dim_trs"], params["num_heads_dim_trs"], params["hidden1_dim_trs"], params["hidden2_dim_trs"], params["out_dim_trs"], params["w_d"]) for rt in rts.keys()}
+    trs_target = deepcopy(trs)
     crd_target.load_state_dict(crd.state_dict())
     crd_target.eval()
-    trs_target.load_state_dict(trs.state_dict())
-    trs_target.eval()
-    crd_optimizer, crd_memory, trs_optimizer, trs_memory= optim.Adam(crd.parameters(), lr=params["crd_lr"]), ReplayMemory(max_len=params["max_len_crd"], sample_size=params["mini_batch_crd"]), optim.Adam(trs.parameters(), lr=params["trs_lr"]), ReplayMemory(max_len=params["max_len_trs"], sample_size=params["mini_batch_trs"])
-
-    initial_study_region = deepcopy(study_region)
-    print("\n----------Start----------")
-    print()
     for rt in rts.keys():
-        print(f"{rt} : {rts[rt].location}")
-    print()
-    for am in ams.keys():
-        print(f"{am} : {ams[am].location}")
+        trs_target[rt].load_state_dict(trs[rt].state_dict())
+        trs_target[rt].eval()
+    crd_optimizer, crd_memory = optim.Adam(crd.parameters(), lr=params["crd_lr"]), ReplayMemory(max_len=params["max_len_crd"], sample_size=params["mini_batch_crd"])
+    trs_optimizer, trs_memory = {}, {}
+    for rt in rts.keys():
+        trs_optimizer[rt], trs_memory[rt] = optim.Adam(trs[rt].parameters(), lr=params["trs_lr"]), ReplayMemory(max_len=params["max_len_trs"], sample_size=params["mini_batch_trs"])
+    print("\n----------Start----------")
+    initial_study_region = deepcopy(study_region)
 
-    time_period = params["time_period"]
-
-    for i in range(1, params["epoch"] + 1):
+    for epoch in range(1, max_day + 1):
+        ams = ams_total[epoch]
+        for rt in rts.keys():
+            print(f"{rt} : {rts[rt].location}")
         print()
+        for am in ams.keys():
+            print(f"{am} : {ams[am].location()}")
+
         refueling_list = []
-        for t in range(1, time_period + 1):
+        for t in range(1, params["time_period"] + 1):
             print(f"\n---------- Time : {t:2} ----------")
             # print("Now Refueling :", refueling_list)
             requests = []
+            print("Moving Agricultural Machines")
             for am in [am for am in ams if not ams[am].refueling]:
-                print(f"AM : {am}({ams[am].speed})")
-                ams[am].move(study_region=study_region, t=t)
+                print("\t", am)
+                ams[am].move(study_region_idx=study_region)
                 if ams[am].request >= 0:
                     requests.append(am)
-                print()
             able_rts = [rt for rt in rts.keys() if not rts[rt].refueling]
 
             print("Able_rts :", able_rts)
-
             print("Requests :", requests)
+
             for am in requests:
                 print(am, ":", ams[am].request, end="   ")
 
@@ -198,33 +203,62 @@ def predictive_mobile_refuel(rts, ams, study_region, params):
                     action = q_result.argmax().item()
                 # print(q_result, "-->", action)
                 chosen_rt = f"rt{entire_state_assign[action][0]}"
-                chosen_am = f"am{entire_state_assign[action][6]}"
-                print(f"{chosen_rt}{tuple(rts[chosen_rt].location)} -- {chosen_am}{tuple(ams[chosen_am].location)}", end="  :  ")
+                chosen_am = am_additional + f"{entire_state_assign[action][6]}"
+                print(f"{chosen_rt}{tuple(rts[chosen_rt].location)} -- {chosen_am}{tuple(ams[chosen_am].location())}", end="  :  ")
                 able_rts.remove(chosen_rt)
                 requests.remove(chosen_am)
                 assign_rt_am(chosen_rt, chosen_am, rts[chosen_rt], ams[chosen_am], study_region, t, refueling_list)
                 print()
                 # crd_memory.add_buffer([entire_state_assign, action, ])
+
+
             print("\nCharging State :")
             refuel_process(rts, ams, t, refueling_list)
             print()
 
+            minus1_requests = (am for am in ams.keys() if ams[am].request == -1 and ams[am].location != ('0', '0'))
             for rt in able_rts:
+                p_t_env_rt = params["w_s"] * rts[rt].total_fuel_supply - params["w_c"] * rts[rt].moving_cost - params["w_waiting"] * sum((ams[am].request + 1) for am in ams.keys())
+                ams_potential_energy_prior = {am: math.exp(-params["w_d"] * (abs(int(ams[am].location()[0]) - rts[rt].location[0]) + abs(int(ams[am].location()[1]) - rts[rt].location[1]))) for am in minus1_requests}
+                potential_energy_prior = sum(ams_potential_energy_prior.values())
                 entire_state_unassign = tks_transformer_encoder(rts[rt], ams, t)
                 state_tensor = torch.tensor(entire_state_unassign, dtype=torch.float)
                 with torch.no_grad():
-                    q_result = trs(state_tensor)
+                    q_result = trs[rt](state_tensor)
                     action = q_result.argmax().item()
                 rts[rt].tks_move(action=action, study_region=study_region)
+                ams_potential_energy_next = {am: math.exp(-params["w_d"] * (abs(int(ams[am].location()[0]) - rts[rt].location[0]) + abs(int(ams[am].location()[1]) - rts[rt].location[1]))) for am in minus1_requests}
+                potential_energy_next = sum(ams_potential_energy_next.values())
+
+                r_t_pe_rt = potential_energy_next - potential_energy_prior
+                reward_t_r_rt = p_t_env_rt + params["w_r"] * r_t_pe_rt
+                buffer = (entire_state_unassign, action, reward_t_r_rt, tks_transformer_encoder(rts[rt], ams, t))
+                trs_memory[rt].add_buffer(buffer)
+
+                if len(trs_memory[rt].memory) == params["max_len_trs"]:
+                    s_batch, a_batch, r_batch, s_prime_batch = trs_memory[rt].sample()
+                    with torch.no_grad():
+                        max_q_prime = trs_target[rt](s_prime_batch).max(1)[0].unsqueeze(1)
+                        target = r_batch + params["gamma"] * max_q_prime
+                    q_a = trs[rt](s_batch).gather(1, a_batch)
+                    log_probs = torch.log(q_a + 1e-8)
+
+                    loss = -torch.sum(log_probs, target)
+                    trs_optimizer[rt].zero_grad()
+                    loss.backward()
+                    trs_optimizer[rt].step()
+
+                if t % 5 == 0:
+                    trs_target[rt].load_state_dict(trs[rt].state_dict())
 
             print("\nMoved to :")
             for rt in rts.keys():
                 print(f"{rt} : {rts[rt].location}")
             print()
             for am in ams.keys():
-                print(f"{am} : {ams[am].location} to {ams[am].destination}, {ams[am].fuel}({round(ams[am].max_fuel * ams[am].request_fuel_rate, 2)})/{ams[am].max_fuel}")
-        print()
-        study_region = deepcopy(initial_study_region)
+                print(f"{am} : {ams[am].location()}, {ams[am].fuel}({round(ams[am].max_fuel * ams[am].request_threshold, 2)})/{ams[am].max_fuel}")
+            print()
+            study_region = deepcopy(initial_study_region)
     return study_region
 
 class RT:
@@ -238,48 +272,42 @@ class RT:
         self.destination = None
         self.charging_rate = charging_rate
         self.refueling = False
+
+        self.total_fuel_supply = 0
+        self.moving_cost = 0
+
     def crd_move(self, am, study_region):
         self.assignment_state = 1
-        self.destination = am.location
+        self.destination = [int(loc) for loc in am.location()]
 
-        left_move, waiting_count = max(self.v_in, self.v_out), 0
-        while left_move:
-            if self.location == self.destination:
-                self.refueling = True
-                am.refueling = True
-                am.request = -1
-                return True
-            side_direction = self.destination[0] - self.location[0]
-            side_direction = round(math.copysign(1, side_direction)) if side_direction != 0 else 0
-            front_back_direction = self.destination[1] - self.location[1]
-            front_back_direction = round(math.copysign(1, front_back_direction)) if front_back_direction != 0 else 0
-            candidate_list, priority_list = [], []
-            if side_direction:
-                candidate_list.append([self.location[0] + side_direction, self.location[1]])
-            if front_back_direction:
-                candidate_list.append([self.location[0], self.location[1] + front_back_direction])
+        if self.location == self.destination:
+            self.refueling = True
+            am.refueling = True
+            am.request = -1
+            return True
 
-            for x, y in candidate_list:
-                if study_region[x][y] not in ("F", "D"):
-                    priority_list.append((x, y))
+        prior_location = deepcopy(self.location)
+        side_direction = self.destination[0] - self.location[0]
+        side_direction = min(side_direction, self.v_in if study_region[self.location[0]][self.location[1]] == 0 else self.v_out) if side_direction != 0 else 0
+        front_back_direction = self.destination[1] - self.location[1]
+        front_back_direction = min(front_back_direction, self.v_in if study_region[self.location[0]][self.location[1]] == 0 else self.v_out) if front_back_direction != 0 else 0
+        candidate_list, priority_list = [], []
+        if side_direction:
+            candidate_list.append([self.location[0] + side_direction, self.location[1]])
+        if front_back_direction:
+            candidate_list.append([self.location[0], self.location[1] + front_back_direction])
 
-            left_move -= 1
-            if len(priority_list):
-                self.location = list(random.sample(priority_list, 1)[0])
-            else:
-                if len(candidate_list):
-                    if study_region[self.location[0]][self.location[1]] not in ("F", "D"):
-                        self.location = list(random.sample(candidate_list, 1)[0])
-                    else:
-                        decision_distance = 1 / 2 * (1 / self.v_in + 1 / self.v_out)
-                        decision_bool = random.random() > decision_distance
-                        if decision_bool:
-                            self.location = list(random.sample(candidate_list, 1)[0])
-                        else:
-                            if waiting_count > decision_distance:
-                                self.location = list(random.sample(candidate_list, 1)[0])
-                                waiting_count = 0
-                            waiting_count += 1
+        for x, y in candidate_list:
+            if study_region[x][y] != 1:
+                priority_list.append((x, y))
+
+        if len(priority_list):
+            self.location = list(random.sample(priority_list, 1)[0])
+        else:
+            if len(candidate_list):
+                if study_region[self.location[0]][self.location[1]] != 1:
+                    self.location = list(random.sample(candidate_list, 1)[0])
+        self.moving_cost += 0.5 * (abs(self.location[0] - prior_location[0]) + abs(self.location[1] - prior_location[1]))
         return False
 
     def stop_assign(self, contact=False):
@@ -300,25 +328,33 @@ class RT:
 
 class AM:
     def __init__(self, records, request_mean, request_std, fuel_mean, fuel_std):
-        self.locations = [tuple(record.split(";")) for record in records]
+        self.records = [tuple(record.split(";")) for record in records]
 
         self.fuel = random.normalvariate(fuel_mean, fuel_std)
         self.max_fuel = self.fuel
         self.request_threshold = random.normalvariate(request_mean, request_std)
 
+        self.loc_time = 0
         self.request = -1
         self.w_waiting_st = 0
-        self.accumulated_working_time = -1
+        self.accumulated_working_time = 0
         self.last_refueling_time = 0
         self.refueling_amount = 0
         self.refueling = False
 
-    def loc(self): return self.locations[self.accumulated_working_time]
+    def location(self): return self.records[self.loc_time]
 
-    def move(self):
+    def move(self, study_region_idx):
+        if self.location() == ('0', '0') or self.refueling:
+            return
+
         if self.fuel > 0:
+            if study_region_idx[int(self.location()[0])][int(self.location()[1])] == 1:
+                study_region_idx[int(self.location()[0])][int(self.location()[1])] = 0
+            self.loc_time += 1
             self.fuel = max(0, self.fuel - 2)
-            self.accumulated_working_time += 1
+            if study_region_idx:
+                self.accumulated_working_time += 1
 
         if self.max_fuel * self.request_threshold >= self.fuel:
             self.request += 1
@@ -327,6 +363,7 @@ class AM:
         prior_fuel = self.fuel
         self.fuel = min(self.max_fuel, self.fuel + rt.charging_rate)
         self.refueling_amount += (self.fuel - prior_fuel)
+        rt.total_fuel_supply += (self.fuel - prior_fuel)
         if self.fuel == self.max_fuel:
             self.last_refueling_time = t
             w_waiting = self.last_refueling_time - self.w_waiting_st
@@ -339,7 +376,7 @@ def start(refueling_tankers, study_region, platform, params1, params2, csv_path)
 
     width = max(study_region.keys())
     length = max(study_region[width].keys())
-    rts, ams = {}, {}
+    rts, ams, max_day= {}, {}, 0
 
     for rt in refueling_tankers:
         v_in, v_out, charging_rate = refueling_tankers[rt]
@@ -349,15 +386,16 @@ def start(refueling_tankers, study_region, platform, params1, params2, csv_path)
     with open(csv_path, "r", encoding="utf-8") as f:
         for machine_id, day, records in csv.reader(f):
             if machine_id == "machine_id": continue
+            day = int(day)
             if day not in ams: ams[day] = {}
             ams[day][machine_id] = AM(records.split("|"), params1["request_mean"], params1["request_std"], params1["fuel_mean"], params1["fuel_std"])
-    return predictive_mobile_refuel(rts, ams, study_region, params2)
+            if max_day < day: max_day = day
+    return predictive_mobile_refuel(rts, ams, study_region, params2, max_day)
 
 def main():
 
     dispatch_training = True
     reposition_training = False
-    data_testing = False
 
     data_dir = "C:\\Users\\USER\\Documents\\MobRef_GitHub\\data"
     output_dir = ".\\data"
@@ -368,8 +406,8 @@ def main():
 
     saved_path, range_info = find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_am_day)
 
-    platform_x = 50
-    platform_y = 50
+    platform_x = 176
+    platform_y = 310
     platform = (max(1, min(platform_x, row_nums)), max(1, min(platform_y, col_nums)))
 
     min_rt, max_rt = 2, 4
@@ -378,30 +416,28 @@ def main():
     fuel_mean = 40
     fuel_std = 5
 
+    working_areas = [  # MIN_LAT, MAX_LAT, MIN_LNG, MAX_LNG
+        (36.04635058, 36.06342458, 116.14499324, 116.17069701),
+        (36.03839537, 36.14855579, 116.57486009, 116.62898196),
+        (35.89408831, 35.98541373, 116.74336870, 116.80484081),
+        (35.94852120, 36.04374426, 117.09726074, 117.20133489),
+        (35.96993748, 35.99374381, 117.02397783, 117.04133797),
+        (35.80146604, 35.81994942, 117.13927499, 117.17214827),
+        (35.83013730, 35.91009813, 116.43981722, 116.56369568),
+        (35.84135307, 35.90211380, 116.23802495, 116.34077893),
+        (35.46585266, 35.49610145, 116.91805657, 116.94853584)]
+
     params1 = {"request_mean": request_mean, "request_std": request_std, "fuel_mean": fuel_mean, "fuel_std": fuel_std}
-    params2 = {"epoch": 5, "w_d": 0.4, "w_r": 0.6, "time_period": 300,
+    params2 = {"epoch": 5, "w_s": 0.8, "w_c": 0.6, "w_waiting": 0.3, "w_d": 0.4, "w_r": 0.6, "time_period": 200,
               "in_dim_crd": 16, "hidden1_dim_crd": 64, "hidden2_dim_crd": 32, "hidden3_dim_crd": 16, "hidden4_dim_crd": 8, "out_dim_crd": 1,
               "in_dim_trs": 11, "embed_dim_trs": 16, "num_heads_dim_trs": 16, "hidden1_dim_trs": 2, "hidden2_dim_trs": 4, "out_dim_trs": 5,
               "max_len_crd": 100, "batch_size_crd": 50, "mini_batch_crd": 30, "crd_lr": 0.05, "gamma_crd": 0.05,
               "max_len_trs": 100, "batch_size_trs": 50, "mini_batch_trs": 30, "trs_lr": 0.05, "gamma_trs": 0.05}
 
-    refueling_tankers = {f"rt{i+1}": [random.randint(2, 3), random.randint(3, 5), random.randint(5, 8)] for i in range(random.randint(min_rt, max_rt))}
+    refueling_tankers = {f"rt{i+1}": [random.randint(1, 3), random.randint(3, 5), random.randint(2, 4)] for i in range(random.randint(min_rt, max_rt))}
     study_region = {x: {y: 0 for y in range(1, col_nums + 1)} for x in range(1, row_nums + 1)}
 
-    working_areas = [# MIN_LAT, MAX_LAT, MIN_LNG, MAX_LNG
-                    (36.04635058, 36.06342458, 116.14499324, 116.17069701),
-                    (36.03839537, 36.14855579, 116.57486009, 116.62898196),
-                    (35.89408831, 35.98541373, 116.74336870, 116.80484081),
-                    (35.94852120, 36.04374426, 117.09726074, 117.20133489),
-                    (35.96993748, 35.99374381, 117.02397783, 117.04133797),
-                    (35.80146604, 35.81994942, 117.13927499, 117.17214827),
-                    (35.83013730, 35.91009813, 116.43981722, 116.56369568),
-                    (35.84135307, 35.90211380, 116.23802495, 116.34077893),
-                    (35.46585266, 35.49610145, 116.91805657, 116.94853584)]
-    working_areas = [(min_lat, max_lat, min_lng, max_lng) for min_lat, max_lat, min_lng, max_lng in working_areas if range_info["lat_min"] <= min_lat and max_lat <= range_info["lat_max"] and range_info["lng_min"] <= min_lng and max_lng <= range_info["lng_max"]]
-
-    print(range_info)
-    for min_lat, max_lat, min_lng, max_lng in working_areas:
+    for min_lat, max_lat, min_lng, max_lng in ((min_lat, max_lat, min_lng, max_lng) for min_lat, max_lat, min_lng, max_lng in working_areas if range_info["lat_min"] <= min_lat and max_lat <= range_info["lat_max"] and range_info["lng_min"] <= min_lng and max_lng <= range_info["lng_max"]):
         lat_scale = max(range_info["lat_max"] - range_info["lat_min"], 1e-9) / row_nums
         lng_scale = max(range_info["lng_max"] - range_info["lng_min"], 1e-9) / col_nums
         min_row = (min_lat - range_info["lat_min"]) // lat_scale + 1
@@ -413,7 +449,7 @@ def main():
                 study_region[col][row] = 1
 
     region = InitialStudyRegion(row_nums, col_nums)
-    region.show(study_region)
+
     using_csv = "train" if dispatch_training or reposition_training else "test"
     start(refueling_tankers, study_region, platform, params1, params2, saved_path / f"{using_csv}.csv")
 
