@@ -47,7 +47,7 @@ class CompleteRegion(Grid):
         self.n_working_regions = 0
         self.working_regions = []
 
-    def make_working_regions(self, regions: []):
+    def make_working_regions(self, regions: list):
         """
 
         @param regions: [

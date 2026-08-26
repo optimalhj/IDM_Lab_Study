@@ -124,7 +124,7 @@ class REINFORCE2:
             return
 
         # 2. 并行化处理 (Padding + Mask)
-        # s1_padded: (Batch, Max_Len, Feat_Dim)
+        # s1_padded(online_harvester_features): (Batch, Max_Len, Feat_Dim)
         s1_padded = pad_sequence(all_s1, batch_first=True).to(self.device)
         
         # 生成 Mask: (Batch, Max_Len)
@@ -135,14 +135,15 @@ class REINFORCE2:
         # mask[i, j] = j < lengths[i]
         mask = torch.arange(max_len, device=self.device)[None, :] < lengths[:, None]
         
-        # s2: (Batch, Context_Dim)
+        # s2(idle_tankers_features): (Batch, Context_Dim)
         s2_tensor = torch.tensor(np.array(all_s2), dtype=torch.float).to(self.device)
         
-        action_tensor = torch.tensor(all_actions, dtype=torch.int64).view(-1, 1).to(self.device)
         return_tensor = torch.tensor(all_returns, dtype=torch.float).view(-1, 1).to(self.device)
-
+        action_tensor = torch.tensor(all_actions, dtype=torch.int64).view(-1, 1).to(self.device)
+        
         # 3. 并行前向传播 (传入 mask)
         # 输入形状: [Batch, Max_Len, Feat_Dim] -> 输出形状: [Batch, Action_Dim]
+        # s1_padded : online_harvester_features  /  s2_tensor : idle_tankers_features
         _, _, probs, _ = self.policy_net(s1_padded, s2_tensor, mask=mask)
         
         # 4. 计算 Loss
@@ -152,8 +153,8 @@ class REINFORCE2:
         # 防止 log(0)
         log_probs = torch.log(selected_probs + 1e-8)
         
-        # Loss = - sum(log_prob * G)
-        loss = -torch.sum(log_probs * return_tensor)
+        # Loss = - sum(G * log_prob)
+        loss = -torch.sum(return_tensor * log_probs)
         
         # 5. 反向传播与更新 (只做一次)
         loss.backward()
