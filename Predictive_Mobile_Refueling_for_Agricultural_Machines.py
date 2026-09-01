@@ -4,8 +4,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from collections import deque
-import numpy as np
-import pandas as pd
 import random
 import math
 from copy import deepcopy
@@ -142,12 +140,9 @@ def refuel_process(rts, ams,t, refueling_list):
     for assign_set in done_list:
         refueling_list.remove(assign_set)
 
-def reward_calculator(rt, ams, w_d, geographical_distance):
-    potential = 0
-    # for am in ams:
-    #     geographical_distance =
-
-    return potential
+def calculate_distance(location1, location2):
+    (x1, y1), (x2, y2) = location1, location2
+    return math.exp(abs(x1 - x2) + abs(y1 - y2))
 
 def predictive_mobile_refuel(rts, ams_total, study_region, params, max_day):
     crd = CentralRequestDispatcher(params["in_dim_crd"], params["hidden1_dim_crd"], params["hidden2_dim_crd"], params["hidden3_dim_crd"], params["hidden4_dim_crd"], params["out_dim_crd"])
@@ -209,8 +204,6 @@ def predictive_mobile_refuel(rts, ams_total, study_region, params, max_day):
                 requests.remove(chosen_am)
                 assign_rt_am(chosen_rt, chosen_am, rts[chosen_rt], ams[chosen_am], study_region, t, refueling_list)
                 print()
-                # crd_memory.add_buffer([entire_state_assign, action, ])
-
 
             print("\nCharging State :")
             refuel_process(rts, ams, t, refueling_list)
