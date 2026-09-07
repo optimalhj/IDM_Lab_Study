@@ -307,10 +307,7 @@ class EasyMatchAgent(BaseDispatchAgent):
             state_pack = (all_tanker_features,online_harvesters_features,inter_features)
             
             
-            action = self.algo.take_action(
-                state=state_pack,
-                mask=mask
-                )
+            action = self.algo.take_action(state=state_pack,mask=mask)
             action = int(action)
             
             

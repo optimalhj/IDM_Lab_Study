@@ -1,6 +1,6 @@
 ### Introduction
 
-This project is cloned from https://github.com/stdi-lab/MobRef
+This project is cloned from https://github.com/stdi-lab/MobRef, and code for data input, such as geographic index configuration, has been added.
 It is used for my Deep learning Study!
 
 This is the source code for the paper:

@@ -120,8 +120,7 @@ class REINFORCE2:
             all_returns.extend(trajectory_returns)
             
         # 如果没有数据，直接返回
-        if not all_s1:
-            return
+        if not all_s1: return
 
         # 2. 并行化处理 (Padding + Mask)
         # s1_padded(online_harvester_features): (Batch, Max_Len, Feat_Dim)
