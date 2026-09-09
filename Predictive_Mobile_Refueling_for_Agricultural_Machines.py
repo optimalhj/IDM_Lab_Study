@@ -1,64 +1,59 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
 import torch.optim as optim
 
+import numpy as np
 from collections import deque
 import random
 import math
 from copy import deepcopy
 
 from dataset import find_dataset
-from olds.Predictive_Mobile_Refueling_for_Agricultural_Machines import InitialStudyRegion
-
-am_additional = "corn_harvestor_"
+rt_additional = "RT"
+am_additional = "AM"
 
 class CentralRequestDispatcher(nn.Module):
     def __init__(self, in_dim_crd, hidden1_dim_crd, hidden2_dim_crd, hidden3_dim_crd, hidden4_dim_crd, out_dim_crd):
         super(CentralRequestDispatcher, self).__init__()
-        self.layer1 = nn.Linear(in_dim_crd, hidden1_dim_crd)
-        self.layer2 = nn.Linear(hidden1_dim_crd, hidden2_dim_crd)
-        self.layer3 = nn.Linear(hidden2_dim_crd, hidden3_dim_crd)
-        self.layer4 = nn.Linear(hidden3_dim_crd, hidden4_dim_crd)
-        self.layer5 = nn.Linear(hidden4_dim_crd, out_dim_crd)
 
-    def forward(self, x):
-        x = self.layer1(x)
+        self.layer1 = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=in_dim_crd, nhead=4, dim_feedforward=64, batch_first=True), 4)
+        self.layer2 = nn.Linear(in_dim_crd, out_dim_crd)
+
+    def forward(self, x, padding_mask=None):
+        x = self.layer1(x, src_key_padding_mask=padding_mask)
         x = F.relu(x)
+
         x = self.layer2(x)
         x = F.relu(x)
-        x = self.layer3(x)
-        x = F.relu(x)
-        x = self.layer4(x)
-        x = F.relu(x)
-        x = self.layer5(x)
-        x = x.t().squeeze()
-        x = F.softmax(x, dim=0)
         return x
 
 class TankerRepositionScheduler(nn.Module):
-    def __init__(self, in_dim_trs, embed_dim_trs, num_heads_dim_trs, hidden1_dim_trs, hidden2_dim_trs, out_dim_trs, w_d):
+    def __init__(self, in_dim_trs, embed_dim_trs, num_heads_dim_trs, hidden1_dim_trs, hidden2_dim_trs, out_dim_trs):
         super(TankerRepositionScheduler, self).__init__()
+        self.layer0 = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=in_dim_trs, nhead=1, dim_feedforward=64, batch_first=True), 4)
         self.layer1 = nn.Linear(in_dim_trs, embed_dim_trs)
         self.layer2 = nn.MultiheadAttention(embed_dim_trs, num_heads_dim_trs, batch_first=True)
         self.layer3 = nn.Linear(embed_dim_trs, hidden1_dim_trs)
 
-        self.layer4 = nn.Linear(1, hidden2_dim_trs)
-        self.layer5 = nn.Linear(hidden2_dim_trs, 1)
+        self.layer4 = nn.Linear(hidden1_dim_trs, 1 + out_dim_trs)
 
-        self.w_d = w_d
-    def forward(self, x):
+    def forward(self, x, padding_mask=None):
+        x = self.layer0(x, src_key_padding_mask=padding_mask)
+        x = F.relu(x)
         x = self.layer1(x)
         x = F.relu(x)
         x, _ = self.layer2(x, x, x)
-        x = torch.mean(x, dim=0, keepdim=True)
+
+        x = torch.mean(x, dim=1, keepdim=True)
+
         x = self.layer3(x)
-        length = torch.sum(torch.abs(x),dim=1).unsqueeze(0).t()
-        length = self.layer4(length)
-        length = F.relu(length)
-        length = self.layer5(length)
-        x = torch.concatenate([x @ torch.tensor([[-1, 0], [0, 1], [1, 0], [0, -1]], dtype=torch.float).t(), length], dim=1)
-        x = F.softmax(x, dim=1)
+        x = F.relu(x)
+
+        x = self.layer4(x)
+        x = F.relu(x)
+        x = x.squeeze(0)
         return x
 
 class ReplayMemory:
@@ -75,79 +70,97 @@ class ReplayMemory:
             a_lst.append(a)
             r_lst.append(r)
             s_prime_lst.append(s_prime)
-        return torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), torch.tensor(r_lst, dtype=torch.float), torch.tensor(s_prime_lst, dtype=torch.float)
+        return s_lst, a_lst, r_lst, s_prime_lst
+class InitialStudyRegion:
+    def __init__(self, width, length):
+        self.width = width
+        self.length = length
+        self.width_format, self.length_format, decent1, decent2 = 2, 1, 10, 10
+        while 1:
+            if self.width / decent1 >= 1:
+                self.width_format += 1
+                decent1 *= 10
+            else: break
+        while 1:
+            if self.length / decent2 >= 1:
+                self.length_format += 1
+                decent2 *= 10
+            else: break
+    def show(self, study_region):
+        for y in range(self.length, 0, -1):
+            print(f"{y :>{self.length_format}} : ", end="")
+            for x in range(1, self.width + 1):
+                print(f"{study_region[x][y] : >{self.width_format}}", end=" ")
+            print()
+        print(" " * (self.length_format + 3) + "".join([f"{j:>{self.width_format}} " for j in range(1, self.width + 1)]))
 
-def crd_transformer_encoder(rts, ams, t):
+def calculate_distance(location1, location2):
+    (x1, y1), (x2, y2) = location1, location2
+    return (abs(x1 - x2) ** 2 + abs(y1 - y2) ** 2) ** 0.5
+
+def build_crd_state(rts, ams, t, max_time):
+    t += 1
+
     entire_state = []
     for rt in rts:
-        rt_id = [int(rt.replace("rt", ""))]
-        current_location = rts[rt].location
+        space = (rts[rt].width, rts[rt].length)
+        rt_id = [int(rt.replace(rt_additional, ""))]
+        current_location = [(loc - 1) / (max_space - 1) for loc, max_space in zip(rts[rt].location, space)]
         assignment_state = [rts[rt].assignment_state]
-        if assignment_state[0]: intended_destination = rts[rt].destination
+        if assignment_state[0]: intended_destination = [(loc - 1) / (max_space - 1) for loc, max_space in zip(rts[rt].destination, space)]
         else: intended_destination = current_location
         rt_t = rt_id + current_location + assignment_state + intended_destination
 
         for am in ams:
             am_id = [int(am.replace(am_additional, ""))]
-            current_location = [int(loc) for loc in ams[am].location()]
-            historical_record = [ams[am].accumulated_working_time, ams[am].last_refueling_time, ams[am].refueling_amount]
+            current_location = [(loc - 1) / (max_space - 1) for loc, max_space in zip(ams[am].location(t-1), space)]
+            historical_record = [ams[am].accumulated_working_time / t, ams[am].last_refueling_time / t, ams[am].refueling_amount / ams[am].max_fuel]
             request_state = [ams[am].request]
             am_t = am_id + current_location + historical_record + request_state
 
-            total_path = abs(rts[rt].location[0] - int(ams[am].location()[0])) + abs(rts[rt].location[1] - int(ams[am].location()[1]))
+            total_path = (abs(rts[rt].location[0] - ams[am].location(t-1)[0]) + abs(rts[rt].location[1] - ams[am].location(t-1)[1])) / (sum(space) - 2)
             extra_path = 0
             mi_t = [total_path, extra_path]
-            batch = rt_t + am_t + mi_t + [t]
+            batch = rt_t + am_t + mi_t + [t / max_time]
             entire_state.append(batch)
     return entire_state
 
-def tks_transformer_encoder(rts, ams, t):
+def build_trs_state(rts, ams, t, max_time):
+    space, t = (rts.width, rts.length), t + 1
     entire_state = []
 
     assignment_state = [rts.assignment_state]
     if assignment_state[0]: intended_destination = rts.destination
-    else: intended_destination = [0, 0]
-    ot_t = assignment_state + intended_destination
-
-    x, y = rts.location
-    for am in ams:
+    else: intended_destination = rts.location
+    ot_t = assignment_state + [float((loc - 1) / (max_space - 1)) for loc, max_space in zip(intended_destination, space)]
+    for am in ams.keys():
         am_id = [int(am.replace(am_additional, ""))]
-        relative_location = [int(ams[am].location()[0]) - x, int(ams[am].location()[1]) - y]
-        historical_record = [ams[am].accumulated_working_time, ams[am].last_refueling_time, ams[am].refueling_amount]
+        relative_location = [float((am_loc - rt_loc) / (max_space - 1)) for am_loc, rt_loc, max_space in zip(ams[am].location(t-1), rts.location, space)]
+        historical_record = [ams[am].accumulated_working_time / t, ams[am].last_refueling_time / t, ams[am].refueling_amount / ams[am].max_fuel]
         request_state = [ams[am].request]
         am_t_prime = am_id + relative_location + historical_record + request_state
 
-        batch = ot_t + am_t_prime + [t]
+        batch = ot_t + am_t_prime + [t / max_time]
         entire_state.append(batch)
     return entire_state
 
-def assign_rt_am(rt, am, rts, ams, study_region, t, refueling_list):
-    contact = rts.crd_move(ams, study_region=study_region)
-    print(f"Contact:{contact}", end="")
-    if contact and (rt, am) not in refueling_list:
-        refueling_list.append((rt, am))
-        print(tuple(rts.location), end="")
+def build_tensor_state(crd_state):
+    return torch.Tensor(crd_state).unsqueeze(0)
 
-def refuel_process(rts, ams,t, refueling_list):
-    done_list = []
-    for (rt, am) in refueling_list:
-        done = ams[am].refuel(rts[rt], t)
-        print(f"{rt} -- {am} : {done}({ams[am].fuel}/{ams[am].max_fuel}),Refueled:{rts[rt].charging_rate}")
-        if done:
-            rts[rt].stop_assign(contact=True)
-            ams[am].refueling = False
-            done_list.append((rt, am))
-    for assign_set in done_list:
-        refueling_list.remove(assign_set)
+def build_tensor_state_batch(state_list):
+    tensors = [torch.as_tensor(state, dtype=torch.float32) for state in state_list]
+    lengths = torch.tensor([state.shape[0] for state in tensors], dtype=torch.long)
+    states = pad_sequence(tensors, batch_first=True, padding_value=0.0)
 
-def calculate_distance(location1, location2):
-    (x1, y1), (x2, y2) = location1, location2
-    return math.exp(abs(x1 - x2) + abs(y1 - y2))
+    max_len = states.size(1)
+    # True = padding
+    padding_mask = (torch.arange(max_len).unsqueeze(0) >= lengths.unsqueeze(1))
+    return states, padding_mask
 
-def predictive_mobile_refuel(rts, ams_total, study_region, params, max_day):
+def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, max_group_id):
     crd = CentralRequestDispatcher(params["in_dim_crd"], params["hidden1_dim_crd"], params["hidden2_dim_crd"], params["hidden3_dim_crd"], params["hidden4_dim_crd"], params["out_dim_crd"])
     crd_target = deepcopy(crd)
-    trs = {rt: TankerRepositionScheduler(params["in_dim_trs"], params["embed_dim_trs"], params["num_heads_dim_trs"], params["hidden1_dim_trs"], params["hidden2_dim_trs"], params["out_dim_trs"], params["w_d"]) for rt in rts.keys()}
+    trs = {rt: TankerRepositionScheduler(params["in_dim_trs"], params["embed_dim_trs"], params["num_heads_dim_trs"], params["hidden1_dim_trs"], params["hidden2_dim_trs"], params["out_dim_trs"]) for rt in rts.keys()}
     trs_target = deepcopy(trs)
     crd_target.load_state_dict(crd.state_dict())
     crd_target.eval()
@@ -159,175 +172,286 @@ def predictive_mobile_refuel(rts, ams_total, study_region, params, max_day):
     for rt in rts.keys():
         trs_optimizer[rt], trs_memory[rt] = optim.Adam(trs[rt].parameters(), lr=params["trs_lr"]), ReplayMemory(max_len=params["max_len_trs"], sample_size=params["mini_batch_trs"])
     print("\n----------Start----------")
-    initial_study_region = deepcopy(study_region)
 
-    for epoch in range(1, max_day + 1):
-        ams = ams_total[epoch]
-        for rt in rts.keys():
-            print(f"{rt} : {rts[rt].location}")
-        print()
-        for am in ams.keys():
-            print(f"{am} : {ams[am].location()}")
+    for epoch in range(params["crd_epoch"]):
+        print(f"--------- EPISODE {epoch + 1} ---------")
+        i = 1
+        for group_id in range(1, max_group_id + 1):
+            ams = ams_total[group_id]
 
-        refueling_list = []
-        for t in range(1, params["time_period"] + 1):
-            print(f"\n---------- Time : {t:2} ----------")
-            # print("Now Refueling :", refueling_list)
-            requests = []
-            print("Moving Agricultural Machines")
-            for am in [am for am in ams if not ams[am].refueling]:
-                print("\t", am)
-                ams[am].move(study_region_idx=study_region)
-                if ams[am].request >= 0:
-                    requests.append(am)
-            able_rts = [rt for rt in rts.keys() if not rts[rt].refueling]
+            system_refueling = []
+            for t in range(params["time_step"]):
+                print(f"Time : {t + 1}")
 
-            print("Able_rts :", able_rts)
-            print("Requests :", requests)
+                online_ams = {am: ams[am] for am in ams.keys() if ams[am].location(t) != (0, 0)}
+                if not len(online_ams): continue
 
-            for am in requests:
-                print(am, ":", ams[am].request, end="   ")
-
-            print("\n\nPaired :")
-            while len(able_rts) and len(requests):
-                entire_state_assign = crd_transformer_encoder({rt: rts[rt] for rt in able_rts}, {am: ams[am] for am in requests}, t)
-                state_tensor = torch.tensor(entire_state_assign, dtype=torch.float)
-                # print(state_tensor)
-                with torch.no_grad():
-                    q_result = crd(state_tensor)
-                    action = q_result.argmax().item()
-                # print(q_result, "-->", action)
-                chosen_rt = f"rt{entire_state_assign[action][0]}"
-                chosen_am = am_additional + f"{entire_state_assign[action][6]}"
-                print(f"{chosen_rt}{tuple(rts[chosen_rt].location)} -- {chosen_am}{tuple(ams[chosen_am].location())}", end="  :  ")
-                able_rts.remove(chosen_rt)
-                requests.remove(chosen_am)
-                assign_rt_am(chosen_rt, chosen_am, rts[chosen_rt], ams[chosen_am], study_region, t, refueling_list)
+                print("Online AMS")
+                for am in online_ams.keys():
+                    print(f"\t{am} : {online_ams[am].location(t)}  /  Fuel: {online_ams[am].fuel}/{online_ams[am].max_fuel}")
                 print()
 
-            print("\nCharging State :")
-            refuel_process(rts, ams, t, refueling_list)
-            print()
+                able_rts = []
+                for rt in rts:
+                    if not rts[rt].refueling:
+                        able_rts.append(rt)
+                print(f"AbleRTs : {able_rts}")
 
-            minus1_requests = (am for am in ams.keys() if ams[am].request == -1 and ams[am].location != ('0', '0'))
-            for rt in able_rts:
-                p_t_env_rt = params["w_s"] * rts[rt].total_fuel_supply - params["w_c"] * rts[rt].moving_cost - params["w_waiting"] * sum((ams[am].request + 1) for am in ams.keys())
-                ams_potential_energy_prior = {am: math.exp(-params["w_d"] * (abs(int(ams[am].location()[0]) - rts[rt].location[0]) + abs(int(ams[am].location()[1]) - rts[rt].location[1]))) for am in minus1_requests}
-                potential_energy_prior = sum(ams_potential_energy_prior.values())
-                entire_state_unassign = tks_transformer_encoder(rts[rt], ams, t)
-                state_tensor = torch.tensor(entire_state_unassign, dtype=torch.float)
-                with torch.no_grad():
-                    q_result = trs[rt](state_tensor)
-                    action = q_result.argmax().item()
-                rts[rt].tks_move(action=action, study_region=study_region)
-                ams_potential_energy_next = {am: math.exp(-params["w_d"] * (abs(int(ams[am].location()[0]) - rts[rt].location[0]) + abs(int(ams[am].location()[1]) - rts[rt].location[1]))) for am in minus1_requests}
-                potential_energy_next = sum(ams_potential_energy_next.values())
+                request_ams = []
+                for am in online_ams.keys():
+                    online_ams[am].step(t)
+                    if online_ams[am].request >= 0:
+                        request_ams.append(am)
+                print(f"Request : {request_ams}")
 
-                r_t_pe_rt = potential_energy_next - potential_energy_prior
-                reward_t_r_rt = p_t_env_rt + params["w_r"] * r_t_pe_rt
-                buffer = (entire_state_unassign, action, reward_t_r_rt, tks_transformer_encoder(rts[rt], ams, t))
-                trs_memory[rt].add_buffer(buffer)
 
-                if len(trs_memory[rt].memory) == params["max_len_trs"]:
-                    s_batch, a_batch, r_batch, s_prime_batch = trs_memory[rt].sample()
+                if len(system_refueling):
+                    print("Refueling")
+                    for pair in system_refueling:
+                        print(pair, f"charging : {online_ams[pair[1]].fuel}/{online_ams[pair[1]].max_fuel}")
+                    print()
+
+                if len(request_ams) and len(able_rts): print("Assignment")
+                while len(request_ams) and len(able_rts):
+                    crd_state = build_crd_state({rt: rts[rt] for rt in able_rts}, {am: online_ams[am] for am in request_ams}, t, params["time_step"])
+                    for state in crd_state:
+                        print("\t", state)
+
+                    if i < 0.45:
+                        crd_action = random.randint(0, len(crd_state) - 1)
+                    else:
+                        crd_state_tensor = build_tensor_state(crd_state)
+                        with torch.no_grad():
+                            crd_action = crd(crd_state_tensor).argmax().item()
+                    i *= 0.99
+                    crd_best_action = crd_state[crd_action]
+                    assigned_rt, assigned_am = f"{rt_additional}{crd_best_action[0]}", f"{am_additional}{crd_best_action[6]}"
+
+                    print(f"{assigned_rt}{tuple(rts[assigned_rt].location)} <-> {assigned_am}({online_ams[assigned_am].location(t)})")
+
+                    assign_rt, assign_am = rts[f"{rt_additional}{crd_best_action[0]}"], online_ams[f"{am_additional}{crd_best_action[6]}"]
+                    assign_rt.assignment_state = 1
+                    assign_rt.destination = list(assign_am.location(t))
+                    assign_rt.moving_cost += 0.05
+
+                    if assign_rt.crd_move(study_region=study_region):
+                        pair = (assigned_rt, assigned_am)
+                        if pair not in system_refueling:
+                            system_refueling.append(pair)
+                        assign_rt.refueling = True
+                        assign_am.refueling = True
+                        assign_am.request = -1
+
+                    crd_prime_state = build_crd_state({rt: rts[rt] for rt in able_rts}, {am: online_ams[am] for am in request_ams}, t, params["time_step"])
+                    buffer = crd_state, crd_action, -1, crd_prime_state
+                    crd_memory.add_buffer(buffer)
+
+                    request_ams.remove(assigned_am)
+                    able_rts.remove(assigned_rt)
+
+                if len(crd_memory.memory) >= params["batch_size_crd"]:
+                    s_list, a_list, r_list, s_prime_list = crd_memory.sample()
+
+                    (s_batch, s_padding_mask), (s_prime_batch, s_prime_padding_mask) = [build_tensor_state_batch(state_list) for state_list in (s_list, s_prime_list)]
+                    a_batch, r_batch = torch.tensor(a_list, dtype=torch.int32), torch.tensor(r_list, dtype=torch.int32)
+
                     with torch.no_grad():
-                        max_q_prime = trs_target[rt](s_prime_batch).max(1)[0].unsqueeze(1)
-                        target = r_batch + params["gamma"] * max_q_prime
-                    q_a = trs[rt](s_batch).gather(1, a_batch)
-                    log_probs = torch.log(q_a + 1e-8)
+                        q_primes = crd_target(s_prime_batch, padding_mask=s_prime_padding_mask)
+                        q_primes = q_primes.squeeze(-1)
+                        q_primes = q_primes.masked_fill(s_prime_padding_mask, -torch.inf)
+                        max_q_prime = q_primes.max(dim=-1).values
+                        # q_primes = crd_target(s_prime_batch)
+                        # max_q_prime = q_primes.max(dim=1).values
+                        target = r_batch + params["gamma_crd"] * max_q_prime
+                    q_values = crd(s_batch, padding_mask=s_padding_mask)
+                    q_values = q_values.squeeze(-1)
 
-                    loss = -torch.sum(log_probs, target)
-                    trs_optimizer[rt].zero_grad()
+                    q_a = q_values.gather(dim=1, index=a_batch.unsqueeze(1)).squeeze(1)
+                    # q_a = crd(s_batch)[0, a_batch]
+                    loss = F.smooth_l1_loss(q_a, target)
+                    crd_optimizer.zero_grad()
                     loss.backward()
-                    trs_optimizer[rt].step()
+                    crd_optimizer.step()
 
-                if t % 5 == 0:
-                    trs_target[rt].load_state_dict(trs[rt].state_dict())
 
-            print("\nMoved to :")
-            for rt in rts.keys():
-                print(f"{rt} : {rts[rt].location}")
-            print()
-            for am in ams.keys():
-                print(f"{am} : {ams[am].location()}, {ams[am].fuel}({round(ams[am].max_fuel * ams[am].request_threshold, 2)})/{ams[am].max_fuel}")
-            print()
-            study_region = deepcopy(initial_study_region)
-    return study_region
+                deleting_pairs = []
+                for assigned_rt, assigned_am in system_refueling:
+                    rts[assigned_rt].total_fuel_supply += rts[assigned_rt].charging_rate
+                    online_ams[assigned_am].refueling_amount += rts[assigned_rt].charging_rate
+                    online_ams[assigned_am].fuel = min(online_ams[assigned_am].fuel + rts[assigned_rt].charging_rate, online_ams[assigned_am].max_fuel)
+
+                    if online_ams[assigned_am].fuel == online_ams[assigned_am].max_fuel:
+
+                        rts[assigned_rt].assignment_state = 0
+                        rts[assigned_rt].destination = None
+                        rts[assigned_rt].refueling = False
+                        online_ams[assigned_am].refueling = False
+                        online_ams[assigned_am].last_refueling_time = t
+                        online_ams[assigned_am].w_waiting_st = 0
+                        deleting_pairs.append((assigned_rt, assigned_am))
+
+                for pair in reversed(deleting_pairs):
+                    system_refueling.remove(pair)
+                print()
+
+                if len(able_rts): print("Reposition")
+                for rt in able_rts:
+                    rts[rt].assignment_state,rts[rt].destination = 0, None
+                    trs_state = build_trs_state(rts[rt], online_ams, t, params["time_step"] + 1)
+                    trs_tensor_state = build_tensor_state(trs_state)
+                    print()
+                    for state in trs_state:
+                        print(rt, state, end="  ->  ")
+                    with torch.no_grad():
+                        trs_action = trs[rt](trs_tensor_state)
+                    print(trs_action)
+                    print(f"->  {trs_action.argmax().item()}", end="   /   ")
+                    print(f"{tuple(rts[rt].location)}", end=" -> ")
+                    reward_before = sum(calculate_distance(rts[rt].location, online_ams[am].location(t)) for am in online_ams)
+                    reward_after = rts[rt].trs_move(action=trs_action.argmax().item(), m_location=(online_ams[am].location(t) for am in online_ams), study_region=study_region)
+                    reward = -(reward_after - reward_before) # lower is Good
+                    buffer = trs_state, trs_action.argmax().item(), reward, build_trs_state(rts[rt], online_ams, t, params["time_step"] + 1)
+                    trs_memory[rt].add_buffer(buffer)
+                    print(tuple(rts[rt].location))
+
+                    if len(trs_memory[rt].memory) >= params["batch_size_trs"]:
+                        s_list, a_list, r_list, s_prime_list = trs_memory[rt].sample()
+
+                        (s_batch, s_padding_mask), (s_prime_batch, s_prime_padding_mask) = [build_tensor_state_batch(state_list) for state_list in (s_list, s_prime_list)]
+                        a_batch, r_batch = torch.tensor(a_list, dtype=torch.int32), torch.tensor(r_list, dtype=torch.int32)
+
+
+                        with torch.no_grad():
+                            q_primes = trs_target[rt](s_prime_batch, padding_mask=s_prime_padding_mask)
+                            q_primes = q_primes.squeeze(1)
+                            max_q_prime = q_primes.max(dim=-1).values
+
+                            target = r_batch + params["gamma_trs"] * max_q_prime
+                        q_values = trs[rt](s_batch, padding_mask=s_padding_mask)
+                        q_values = q_values.squeeze(1)
+
+                        q_a = q_values.gather(dim=1, index=a_batch.unsqueeze(1)).squeeze(1)
+
+                        loss = F.smooth_l1_loss(q_a, target)
+                        crd_optimizer.zero_grad()
+                        loss.backward()
+                        crd_optimizer.step()
+                        # for i in range(params["mini_batch_trs"]):
+                        #     s_batch, s_prime_batch = [build_tensor_state(sample_list[i]) for sample_list in (s_list, s_prime_list)]
+                        #     a_batch, r_batch = torch.tensor([a_list[i]]), torch.tensor(r_list[i])
+                        #     with torch.no_grad():
+                        #         q_primes = trs_target[rt](s_prime_batch)
+                        #         max_q_prime = q_primes.max(dim=1).values
+                        #         target = r_batch + params["gamma_trs"] * max_q_prime
+                        #     q_a = trs[rt](s_batch).gather(1, a_batch.unsqueeze(1))
+                        #     loss = F.smooth_l1_loss(q_a, target)
+                        #
+                        #     trs_optimizer[rt].zero_grad()
+                        #     loss.backward()
+                        #     trs_optimizer[rt].step()
+                    if epoch % 5 == 0:
+                        trs_target[rt].load_state_dict(trs[rt].state_dict())
+
+                print()
+                print("-" * 50)
+            for rt in rts.keys(): rts[rt].initialize()
+            if epoch % 4 == 0:
+                crd_target.load_state_dict(crd.state_dict())
+    return
 
 class RT:
-    def __init__(self, width, length, platform, v_in, v_out, charging_rate):
+    def __init__(self, width, length, platform, v_in, v_out, charging_rate,base_directions,scaling_point):
+
         self.width = width
         self.length = length
         self.location = list(platform).copy()
         self.v_in = v_in
         self.v_out = v_out
-        self.assignment_state = 0
-        self.destination = None
         self.charging_rate = charging_rate
-        self.refueling = False
+        self.base_directions = base_directions
+        self.scaling_point = scaling_point
 
+        self.platform = list(platform).copy()
         self.total_fuel_supply = 0
         self.moving_cost = 0
 
-    def crd_move(self, am, study_region):
-        self.assignment_state = 1
-        self.destination = [int(loc) for loc in am.location()]
-
-        if self.location == self.destination:
-            self.refueling = True
-            am.refueling = True
-            am.request = -1
-            return True
-
-        prior_location = deepcopy(self.location)
-        side_direction = self.destination[0] - self.location[0]
-        side_direction = min(side_direction, self.v_in if study_region[self.location[0]][self.location[1]] == 0 else self.v_out) if side_direction != 0 else 0
-        front_back_direction = self.destination[1] - self.location[1]
-        front_back_direction = min(front_back_direction, self.v_in if study_region[self.location[0]][self.location[1]] == 0 else self.v_out) if front_back_direction != 0 else 0
-        candidate_list, priority_list = [], []
-        if side_direction:
-            candidate_list.append([self.location[0] + side_direction, self.location[1]])
-        if front_back_direction:
-            candidate_list.append([self.location[0], self.location[1] + front_back_direction])
-
-        for x, y in candidate_list:
-            if study_region[x][y] != 1:
-                priority_list.append((x, y))
-
-        if len(priority_list):
-            self.location = list(random.sample(priority_list, 1)[0])
-        else:
-            if len(candidate_list):
-                if study_region[self.location[0]][self.location[1]] != 1:
-                    self.location = list(random.sample(candidate_list, 1)[0])
-        self.moving_cost += 0.5 * (abs(self.location[0] - prior_location[0]) + abs(self.location[1] - prior_location[1]))
-        return False
-
-    def stop_assign(self, contact=False):
         self.assignment_state = 0
         self.destination = None
-        if contact: self.refueling = False
+        self.refueling = False
 
-    def tks_move(self, action, study_region, remain=0):
-        if action == 0 and self.location[0] != 1:
-            self.location[0] -= 1
-        elif action == 1 and self.location[1] != self.length:
-            self.location[1] += 1
-        elif action == 2 and self.location[0] != self.width:
-            self.location[0] += 1
-        elif action == 3 and self.location[1] != 1:
-            self.location[1] -= 1
-        else: pass
+    def initialize(self):
+        self.location =self.platform.copy()
+        self.total_fuel_supply = 0
+        self.moving_cost = 0
+
+        self.assignment_state = 0
+        self.destination = None
+        self.refueling = False
+
+    def crd_move(self, study_region):
+
+        angle = math.atan2(self.destination[1] - self.location[1], self.destination[0] - self.location[0])
+        vec_x, vec_y = np.array([func(angle) for func in (math.cos, math.sin)]) * self.v_out
+
+        for _ in range(10 ** self.scaling_point):
+            if [round(loc) for loc in self.location] == self.destination: return True
+            x, y = self.location
+            velocity_ratio = 1 if study_region[round(x)][round(y)] == 0 else self.v_in / self.v_out
+            new_x, new_y = [loc + velocity_ratio * vec_loc / 10 ** self.scaling_point for loc, vec_loc in zip((x, y), (vec_x, vec_y))]
+
+            if new_x < 1:
+                new_x = 1
+            elif new_x > self.width:
+                new_x = self.width
+            else: pass
+
+            if new_y < 1:
+                new_y = 1
+            elif new_y > self.length:
+                new_y = self.length
+            else: pass
+
+            self.location = [new_x, new_y]
+        return False
+
+    def trs_move(self, action, m_location, study_region):
+        if action == self.base_directions:
+            pass
+        else:
+            vec_x, vec_y = np.array([func(2 * action / self.base_directions * math.pi) for func in (math.cos, math.sin)]) * self.v_out
+            for _ in range(10 ** self.scaling_point):
+                x, y = self.location
+
+                if study_region[round(x)][round(y)] == 0:
+                    velocity_ratio = 1
+                else:
+                    velocity_ratio = self.v_in / self.v_out
+
+                new_x, new_y = [loc + velocity_ratio * vec_loc / 10 ** self.scaling_point for loc, vec_loc in zip((x,y), (vec_x, vec_y))]
+                if new_x < 1:
+                    new_x = 1
+                elif new_x > self.width:
+                    new_x = self.width
+                else: pass
+
+                if new_y < 1:
+                    new_y = 1
+                elif new_y > self.length:
+                    new_y = self.length
+                else: pass
+
+                self.location = [new_x, new_y]
+        self.location = [round(loc, self.scaling_point) for loc in self.location]
+        return sum(calculate_distance(self.location, loc) for loc in m_location)
 
 class AM:
     def __init__(self, records, request_mean, request_std, fuel_mean, fuel_std):
-        self.records = [tuple(record.split(";")) for record in records]
 
+        self.records = [tuple(int(loc) for loc in record.split(";")) for record in records]
         self.fuel = random.normalvariate(fuel_mean, fuel_std)
         self.max_fuel = self.fuel
-        self.request_threshold = random.normalvariate(request_mean, request_std)
+        self.request_threshold = random.normalvariate(request_mean, request_std) * self.max_fuel
 
-        self.loc_time = 0
         self.request = -1
         self.w_waiting_st = 0
         self.accumulated_working_time = 0
@@ -335,55 +459,44 @@ class AM:
         self.refueling_amount = 0
         self.refueling = False
 
-    def location(self): return self.records[self.loc_time]
+        self.stopped = 0
 
-    def move(self, study_region_idx):
-        if self.location() == ('0', '0') or self.refueling:
-            return
+    def location(self, t):
+        return self.records[t - self.stopped]
 
-        if self.fuel > 0:
-            if study_region_idx[int(self.location()[0])][int(self.location()[1])] == 1:
-                study_region_idx[int(self.location()[0])][int(self.location()[1])] = 0
-            self.loc_time += 1
-            self.fuel = max(0, self.fuel - 2)
-            if study_region_idx:
+    def step(self, t):
+        if not self.refueling:
+            if self.fuel > 0:
                 self.accumulated_working_time += 1
+                self.fuel = max(0, self.fuel - 3)
+            else:
+                if self.w_waiting_st == 0:
+                    self.w_waiting_st = t
 
-        if self.max_fuel * self.request_threshold >= self.fuel:
-            self.request += 1
+            if self.fuel <= self.request_threshold:
+                self.request += 1
+        else:
+            self.stopped += 1
 
-    def refuel(self, rt, t):
-        prior_fuel = self.fuel
-        self.fuel = min(self.max_fuel, self.fuel + rt.charging_rate)
-        self.refueling_amount += (self.fuel - prior_fuel)
-        rt.total_fuel_supply += (self.fuel - prior_fuel)
-        if self.fuel == self.max_fuel:
-            self.last_refueling_time = t
-            w_waiting = self.last_refueling_time - self.w_waiting_st
-            self.w_waiting_st = 0
-            return w_waiting
-        else: return False
-
-
-def start(refueling_tankers, study_region, platform, params1, params2, csv_path):
+def start(refueling_tankers, study_region, set_region, platform, params1, params2, csv_path):
 
     width = max(study_region.keys())
     length = max(study_region[width].keys())
-    rts, ams, max_day= {}, {}, 0
+    rts, ams, max_group_id = {}, {}, -1
 
     for rt in refueling_tankers:
         v_in, v_out, charging_rate = refueling_tankers[rt]
-        rts[rt] = RT(width=width, length=length, platform=platform, v_in=v_in, v_out=v_out, charging_rate=charging_rate)
+        rts[rt] = RT(width=width, length=length, platform=platform, v_in=v_in, v_out=v_out, charging_rate=charging_rate, base_directions=params2["out_dim_trs"], scaling_point=params2["scaling_point"])
 
     import csv
     with open(csv_path, "r", encoding="utf-8") as f:
-        for machine_id, day, records in csv.reader(f):
+        for machine_id, group_id, records in csv.reader(f):
             if machine_id == "machine_id": continue
-            day = int(day)
-            if day not in ams: ams[day] = {}
-            ams[day][machine_id] = AM(records.split("|"), params1["request_mean"], params1["request_std"], params1["fuel_mean"], params1["fuel_std"])
-            if max_day < day: max_day = day
-    return predictive_mobile_refuel(rts, ams, study_region, params2, max_day)
+            group_id = int(group_id)
+            if group_id not in ams: ams[group_id] = {}
+            ams[group_id][machine_id] = AM(records.split("|"), params1["request_mean"], params1["request_std"], params1["fuel_mean"], params1["fuel_std"])
+            if max_group_id < group_id: max_group_id = group_id
+    return predictive_mobile_refuel(rts, ams, study_region, set_region, params2, max_group_id)
 
 def main():
 
@@ -392,22 +505,26 @@ def main():
 
     data_dir = "C:\\Users\\USER\\Documents\\MobRef_GitHub\\data"
     output_dir = ".\\data"
-    row_nums = 450
-    col_nums = 550
+    row_nums = 15
+    col_nums = 20
     choose_machines = [0]  # 0-5: corn, 6: paddy, 7-11: wheat1
     num_am_day = 4
 
     saved_path, range_info = find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_am_day)
 
-    platform_x = 176
-    platform_y = 310
-    platform = (max(1, min(platform_x, row_nums)), max(1, min(platform_y, col_nums)))
+    platform_x = 7
+    platform_y = 4
+    platform = (max(1, min(platform_x, col_nums)), max(1, min(platform_y, row_nums)))
 
-    min_rt, max_rt = 2, 4
+    min_rt, max_rt = 3, 4
     request_mean = 0.5
     request_std = 0.1
     fuel_mean = 40
     fuel_std = 5
+    time_step = 140
+
+    num_base_directions = 12
+    scaling_point = 3
 
     working_areas = [  # MIN_LAT, MAX_LAT, MIN_LNG, MAX_LNG
         (36.04635058, 36.06342458, 116.14499324, 116.17069701),
@@ -421,13 +538,13 @@ def main():
         (35.46585266, 35.49610145, 116.91805657, 116.94853584)]
 
     params1 = {"request_mean": request_mean, "request_std": request_std, "fuel_mean": fuel_mean, "fuel_std": fuel_std}
-    params2 = {"epoch": 5, "w_s": 0.8, "w_c": 0.6, "w_waiting": 0.3, "w_d": 0.4, "w_r": 0.6, "time_period": 200,
+    params2 = {"crd_epoch": 3, "trs_epoch": 5, "w_s": 0.8, "w_c": 0.6, "w_waiting": 0.3, "w_d": 0.4, "w_r": 0.6, "scaling_point": scaling_point, "time_step": min(288, max(0, time_step)),
               "in_dim_crd": 16, "hidden1_dim_crd": 64, "hidden2_dim_crd": 32, "hidden3_dim_crd": 16, "hidden4_dim_crd": 8, "out_dim_crd": 1,
-              "in_dim_trs": 11, "embed_dim_trs": 16, "num_heads_dim_trs": 16, "hidden1_dim_trs": 2, "hidden2_dim_trs": 4, "out_dim_trs": 5,
-              "max_len_crd": 100, "batch_size_crd": 50, "mini_batch_crd": 30, "crd_lr": 0.05, "gamma_crd": 0.05,
+              "in_dim_trs": 11, "embed_dim_trs": 16, "num_heads_dim_trs": 16, "hidden1_dim_trs": 2, "hidden2_dim_trs": 4, "out_dim_trs": num_base_directions,
+              "max_len_crd": 50, "batch_size_crd": 20, "mini_batch_crd": 20, "crd_lr": 0.05, "gamma_crd": 0.05,
               "max_len_trs": 100, "batch_size_trs": 50, "mini_batch_trs": 30, "trs_lr": 0.05, "gamma_trs": 0.05}
 
-    refueling_tankers = {f"rt{i+1}": [random.randint(1, 3), random.randint(3, 5), random.randint(2, 4)] for i in range(random.randint(min_rt, max_rt))}
+    refueling_tankers = {f"{rt_additional}{i+1}": [random.randint(8, 14), random.randint(17, 25), random.randint(2, 4)] for i in range(random.randint(min_rt, max_rt))}
     study_region = {x: {y: 0 for y in range(1, col_nums + 1)} for x in range(1, row_nums + 1)}
 
     for min_lat, max_lat, min_lng, max_lng in ((min_lat, max_lat, min_lng, max_lng) for min_lat, max_lat, min_lng, max_lng in working_areas if range_info["lat_min"] <= min_lat and max_lat <= range_info["lat_max"] and range_info["lng_min"] <= min_lng and max_lng <= range_info["lng_max"]):
@@ -441,10 +558,10 @@ def main():
             for col in range(int(min_col), int(max_col) + 1):
                 study_region[col][row] = 1
 
-    region = InitialStudyRegion(row_nums, col_nums)
-
+    set_region = InitialStudyRegion(row_nums, col_nums)
+    set_region.show(study_region)
     using_csv = "train" if dispatch_training or reposition_training else "test"
-    start(refueling_tankers, study_region, platform, params1, params2, saved_path / f"{using_csv}.csv")
+    start(refueling_tankers, study_region, set_region, platform, params1, params2, saved_path / f"{using_csv}.csv")
 
 if __name__ == '__main__':
     main()

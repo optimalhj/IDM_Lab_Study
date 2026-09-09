@@ -41,21 +41,6 @@ def grid_indices(frame, bounds, row_nums, col_nums):
 
     return indices
 
-def write_csv(output_dir, episodes):
-    path = Path(output_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(("machine_id", "day", "records"))
-        for day, machines in enumerate(episodes):
-
-            for machine_id in machines.keys():
-                records = []
-                for row, col in machines[machine_id]:
-                    records.append(f"{row};{col}")
-                records = "|".join(records)
-                writer.writerow((machine_id, day + 1, records))
-
 def find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_am_day):
     json_path = Path(output_dir) / "metadata.json"
     metadata = {"saved_dir": output_dir, "study_region_shape": [row_nums, col_nums], "Num_am_day": num_am_day, "AM_Groups": list(set(choose_machines))}
@@ -78,7 +63,10 @@ def find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_
                 machine_id = Path(workbook).stem
                 print(machine_id)
                 raw = pd.read_excel(BytesIO(bundle.read(workbook)))
-                frame = raw[["time", "latitude", "longitude"]].copy()
+                try:
+                    frame = raw[["time", "latitude", "longitude"]].copy()
+                except:
+                    frame = raw[["时间", "纬度", "经度"]].copy()
                 frame.columns = ["time", "lat", "lng"]
                 frame["time"] = pd.to_datetime(frame["time"], errors="coerce")
                 frame["lat"] = pd.to_numeric(frame["lat"], errors="coerce")
@@ -93,23 +81,30 @@ def find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_
     bounds = (float(all_lat.min()), float(all_lat.max()), float(all_lng.min()), float(all_lng.max()))
     metadata["range"] = {"lat_min": bounds[0], "lat_max": bounds[1], "lng_min": bounds[2], "lng_max": bounds[3]}
     mapped = {machine_id: grid_indices(prepared[machine_id], bounds, row_nums, col_nums) for machine_id in prepared.keys()}
-    # for machine_id in mapped.keys():
-    #     print(machine_id)
-    #     for row_info, col_info in mapped[machine_id]:
-    #         print("\tRow :", round(row_info, 2), " Col :", round(col_info, 2))
 
     mapped_key = list(mapped)
     seed = 2599
     random.Random(seed).shuffle(mapped_key)
 
-    episodes = [[(machine_id, mapped[machine_id]) for machine_id in list(mapped_key)[idx:idx+num_am_day]] for idx in range(0, len(mapped), num_am_day)]
-    working_per_day = [{machine_id: frame for machine_id, frame in episodes[day]} for day in range(len(episodes)) if len(episodes[day]) == num_am_day]
+    episodes = [[machine_id for machine_id in list(mapped_key)[idx:idx+num_am_day]] for idx in range(0, len(mapped), num_am_day)]
+    working_per_day = [{machine_id: mapped[machine_id] for machine_id in episodes[day]} for day in range(len(episodes)) if len(episodes[day]) == num_am_day]
 
     test_count = max(1, round(len(working_per_day) * 0.25))
     train, test = working_per_day[:-test_count], working_per_day[-test_count:]
 
     for csv_name, data in zip(("\\train.csv", "\\test.csv"), (train, test)):
-        write_csv(output_dir + csv_name, data)
+        path = Path(output_dir + csv_name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(("machine_id", "group_id", "records"))
+            for group_id, ms in enumerate(data):
+                tmp_id = 1
+                for machine_id in ms.keys():
+                    records = "|".join([f"{row};{col}" for row, col in ms[machine_id]])
+                    writer.writerow((f"AM{tmp_id}", group_id + 1, records))
+                    tmp_id += 1
+
 
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, ensure_ascii=False, indent=4)
@@ -121,7 +116,7 @@ def main():
     output_dir = ".\\data"
     row_nums = 450
     col_nums = 550
-    choose_machines = [0]  # 0-5: corn, 6: paddy, 7-11: wheat1
+    choose_machines = [6]  # 0-5: corn, 6: paddy, 7-11: wheat1
     nun_am_day = 4
     find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, nun_am_day)
 
