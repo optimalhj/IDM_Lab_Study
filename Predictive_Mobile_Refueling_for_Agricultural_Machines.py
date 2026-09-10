@@ -514,7 +514,7 @@ def main():
     dispatch_training = True
     reposition_training = False
 
-    data_dir = "C:\\Users\\USER\\Documents\\MobRef_GitHub\\data"
+    data_dir = ""
     output_dir = ".\\data"
     row_nums = 15
     col_nums = 20

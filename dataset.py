@@ -112,7 +112,7 @@ def find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_
     return Path(output_dir), metadata["range"]
 
 def main():
-    data_dir = "C:\\Users\\USER\\Documents\\MobRef_GitHub\\data"
+    data_dir = ""
     output_dir = ".\\data"
     row_nums = 450
     col_nums = 550
