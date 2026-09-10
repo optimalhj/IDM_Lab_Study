@@ -64,9 +64,9 @@ def find_dataset(data_dir, output_dir, row_nums, col_nums, choose_machines, num_
                 print(machine_id)
                 raw = pd.read_excel(BytesIO(bundle.read(workbook)))
                 try:
-                    frame = raw[["time", "latitude", "longitude"]].copy()
-                except:
                     frame = raw[["时间", "纬度", "经度"]].copy()
+                except:
+                    frame = raw[["time", "latitude", "longitude"]].copy()
                 frame.columns = ["time", "lat", "lng"]
                 frame["time"] = pd.to_datetime(frame["time"], errors="coerce")
                 frame["lat"] = pd.to_numeric(frame["lat"], errors="coerce")

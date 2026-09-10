@@ -355,6 +355,7 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
                 print()
                 print("-" * 50)
             for rt in rts.keys(): rts[rt].initialize()
+            for am in ams.keys(): ams[am].initialize()
             if epoch % 4 == 0:
                 crd_target.load_state_dict(crd.state_dict())
     return
@@ -445,9 +446,10 @@ class RT:
         return sum(calculate_distance(self.location, loc) for loc in m_location)
 
 class AM:
-    def __init__(self, records, request_mean, request_std, fuel_mean, fuel_std):
+    def __init__(self, records, request_mean, request_std, consuming, fuel_mean, fuel_std):
 
         self.records = [tuple(int(loc) for loc in record.split(";")) for record in records]
+        self.consuming = consuming
         self.fuel = random.normalvariate(fuel_mean, fuel_std)
         self.max_fuel = self.fuel
         self.request_threshold = random.normalvariate(request_mean, request_std) * self.max_fuel
@@ -458,17 +460,26 @@ class AM:
         self.last_refueling_time = 0
         self.refueling_amount = 0
         self.refueling = False
-
         self.stopped = 0
 
     def location(self, t):
         return self.records[t - self.stopped]
 
+    def initialize(self):
+        self.request = -1
+        self.w_waiting_st = 0
+        self.accumulated_working_time = 0
+        self.last_refueling_time = 0
+        self.refueling_amount = 0
+        self.refueling = False
+
+        self.stopped = 0
+
     def step(self, t):
         if not self.refueling:
             if self.fuel > 0:
                 self.accumulated_working_time += 1
-                self.fuel = max(0, self.fuel - 3)
+                self.fuel = max(0, self.fuel - self.consuming)
             else:
                 if self.w_waiting_st == 0:
                     self.w_waiting_st = t
@@ -494,7 +505,7 @@ def start(refueling_tankers, study_region, set_region, platform, params1, params
             if machine_id == "machine_id": continue
             group_id = int(group_id)
             if group_id not in ams: ams[group_id] = {}
-            ams[group_id][machine_id] = AM(records.split("|"), params1["request_mean"], params1["request_std"], params1["fuel_mean"], params1["fuel_std"])
+            ams[group_id][machine_id] = AM(records.split("|"), params1["request_mean"], params1["request_std"], params1["consuming"], params1["fuel_mean"], params1["fuel_std"])
             if max_group_id < group_id: max_group_id = group_id
     return predictive_mobile_refuel(rts, ams, study_region, set_region, params2, max_group_id)
 
@@ -519,6 +530,7 @@ def main():
     min_rt, max_rt = 3, 4
     request_mean = 0.5
     request_std = 0.1
+    consuming = 3
     fuel_mean = 40
     fuel_std = 5
     time_step = 140
@@ -537,7 +549,7 @@ def main():
         (35.84135307, 35.90211380, 116.23802495, 116.34077893),
         (35.46585266, 35.49610145, 116.91805657, 116.94853584)]
 
-    params1 = {"request_mean": request_mean, "request_std": request_std, "fuel_mean": fuel_mean, "fuel_std": fuel_std}
+    params1 = {"request_mean": request_mean, "request_std": request_std, "consuming": consuming, "fuel_mean": fuel_mean, "fuel_std": fuel_std}
     params2 = {"crd_epoch": 3, "trs_epoch": 5, "w_s": 0.8, "w_c": 0.6, "w_waiting": 0.3, "w_d": 0.4, "w_r": 0.6, "scaling_point": scaling_point, "time_step": min(288, max(0, time_step)),
               "in_dim_crd": 16, "hidden1_dim_crd": 64, "hidden2_dim_crd": 32, "hidden3_dim_crd": 16, "hidden4_dim_crd": 8, "out_dim_crd": 1,
               "in_dim_trs": 11, "embed_dim_trs": 16, "num_heads_dim_trs": 16, "hidden1_dim_trs": 2, "hidden2_dim_trs": 4, "out_dim_trs": num_base_directions,
