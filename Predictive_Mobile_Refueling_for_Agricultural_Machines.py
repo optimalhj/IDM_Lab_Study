@@ -153,9 +153,17 @@ def build_tensor_state_batch(state_list):
     states = pad_sequence(tensors, batch_first=True, padding_value=0.0)
 
     max_len = states.size(1)
-    # True = padding
     padding_mask = (torch.arange(max_len).unsqueeze(0) >= lengths.unsqueeze(1))
     return states, padding_mask
+
+def regulated_profit(w_s, w_c, rts, w_waiting, online_ams):
+    return w_s * sum(rts[rt].total_fuel_supply for rt in rts.keys()) - w_c * sum(rts[rt].moving_cost for rt in rts.keys()) - w_waiting * sum(online_ams[am].w_waiting for am in online_ams)
+
+def trs_energy_calculator(w_d, rts_location, ams_locations):
+    potential_energy = 0
+    for ams_x, ams_y in ams_locations:
+        potential_energy += math.exp(-w_d * abs(ams_x + ams_y - rts_location[0] - rts_location[1]))
+    return potential_energy
 
 def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, max_group_id):
     crd = CentralRequestDispatcher(params["in_dim_crd"], params["hidden1_dim_crd"], params["hidden2_dim_crd"], params["hidden3_dim_crd"], params["hidden4_dim_crd"], params["out_dim_crd"])
@@ -173,8 +181,8 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
         trs_optimizer[rt], trs_memory[rt] = optim.Adam(trs[rt].parameters(), lr=params["trs_lr"]), ReplayMemory(max_len=params["max_len_trs"], sample_size=params["mini_batch_trs"])
     print("\n----------Start----------")
 
-    for epoch in range(params["crd_epoch"]):
-        print(f"--------- EPISODE {epoch + 1} ---------")
+    for crd_epoch in range(params["crd_epoch"]):
+        print(f"--------- EPISODE {crd_epoch + 1} ---------")
         i = 1
         for group_id in range(1, max_group_id + 1):
             ams = ams_total[group_id]
@@ -199,7 +207,7 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
 
                 request_ams = []
                 for am in online_ams.keys():
-                    online_ams[am].step(t)
+                    online_ams[am].step()
                     if online_ams[am].request >= 0:
                         request_ams.append(am)
                 print(f"Request : {request_ams}")
@@ -217,7 +225,7 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
                     for state in crd_state:
                         print("\t", state)
 
-                    if i < 0.45:
+                    if i < 0.88:
                         crd_action = random.randint(0, len(crd_state) - 1)
                     else:
                         crd_state_tensor = build_tensor_state(crd_state)
@@ -241,9 +249,12 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
                         assign_rt.refueling = True
                         assign_am.refueling = True
                         assign_am.request = -1
+                        online_ams[assigned_am].w_waiting = 0
 
                     crd_prime_state = build_crd_state({rt: rts[rt] for rt in able_rts}, {am: online_ams[am] for am in request_ams}, t, params["time_step"])
-                    buffer = crd_state, crd_action, -1, crd_prime_state
+
+                    crd_reward = regulated_profit(params["w_s"], params["w_c"], rts, params["w_waiting"], online_ams)
+                    buffer = crd_state, crd_action, crd_reward, crd_prime_state
                     crd_memory.add_buffer(buffer)
 
                     request_ams.remove(assigned_am)
@@ -256,12 +267,10 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
                     a_batch, r_batch = torch.tensor(a_list, dtype=torch.int32), torch.tensor(r_list, dtype=torch.int32)
 
                     with torch.no_grad():
-                        q_primes = crd_target(s_prime_batch, padding_mask=s_prime_padding_mask)
-                        q_primes = q_primes.squeeze(-1)
+                        q_primes = crd_target(s_prime_batch, padding_mask=s_prime_padding_mask).squeeze(-1)
                         q_primes = q_primes.masked_fill(s_prime_padding_mask, -torch.inf)
                         max_q_prime = q_primes.max(dim=-1).values
-                        # q_primes = crd_target(s_prime_batch)
-                        # max_q_prime = q_primes.max(dim=1).values
+
                         target = r_batch + params["gamma_crd"] * max_q_prime
                     q_values = crd(s_batch, padding_mask=s_padding_mask)
                     q_values = q_values.squeeze(-1)
@@ -287,76 +296,66 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
                         rts[assigned_rt].refueling = False
                         online_ams[assigned_am].refueling = False
                         online_ams[assigned_am].last_refueling_time = t
-                        online_ams[assigned_am].w_waiting_st = 0
                         deleting_pairs.append((assigned_rt, assigned_am))
 
                 for pair in reversed(deleting_pairs):
                     system_refueling.remove(pair)
                 print()
 
-                if len(able_rts): print("Reposition")
-                for rt in able_rts:
-                    rts[rt].assignment_state,rts[rt].destination = 0, None
-                    trs_state = build_trs_state(rts[rt], online_ams, t, params["time_step"] + 1)
-                    trs_tensor_state = build_tensor_state(trs_state)
-                    print()
-                    for state in trs_state:
-                        print(rt, state, end="  ->  ")
-                    with torch.no_grad():
-                        trs_action = trs[rt](trs_tensor_state)
-                    print(trs_action)
-                    print(f"->  {trs_action.argmax().item()}", end="   /   ")
-                    print(f"{tuple(rts[rt].location)}", end=" -> ")
-                    reward_before = sum(calculate_distance(rts[rt].location, online_ams[am].location(t)) for am in online_ams)
-                    reward_after = rts[rt].trs_move(action=trs_action.argmax().item(), m_location=(online_ams[am].location(t) for am in online_ams), study_region=study_region)
-                    reward = -(reward_after - reward_before) # lower is Good
-                    buffer = trs_state, trs_action.argmax().item(), reward, build_trs_state(rts[rt], online_ams, t, params["time_step"] + 1)
-                    trs_memory[rt].add_buffer(buffer)
-                    print(tuple(rts[rt].location))
+                if len(able_rts):
+                    print("Reposition")
+                    for trd_epoch in range(params["trs_epoch"]):
 
-                    if len(trs_memory[rt].memory) >= params["batch_size_trs"]:
-                        s_list, a_list, r_list, s_prime_list = trs_memory[rt].sample()
+                        for rt in able_rts:
+                            rts[rt].assignment_state,rts[rt].destination = 0, None
+                            trs_state = build_trs_state(rts[rt], online_ams, t, params["time_step"] + 1)
+                            trs_tensor_state = build_tensor_state(trs_state)
+                            print()
+                            for state in trs_state:
+                                print(rt, state, end="  ->  ")
+                            with torch.no_grad():
+                                trs_action = trs[rt](trs_tensor_state)
+                            print(trs_action)
+                            print(f"->  {trs_action.argmax().item()}", end="   /   ")
+                            print(f"{tuple(rts[rt].location)}", end=" -> ")
+                            energy_before = trs_energy_calculator(params["w_d"], rts[rt].location, [online_ams[am].location(t) for am in online_ams if online_ams[am].request == -1])
+                            rts[rt].trs_move(action=trs_action.argmax().item(), study_region=study_region)
+                            energy_after = trs_energy_calculator(params["w_d"], rts[rt].location, [online_ams[am].location(t) for am in online_ams if online_ams[am].request == -1])
+                            r_pei = -(energy_after - energy_before)
+                            p_envi = regulated_profit(params["w_s"], params["w_c"], {rt: rts[rt]}, params["w_waiting"], online_ams)
+                            reward = p_envi + params["w_r"] * r_pei
+                            buffer = trs_state, trs_action.argmax().item(), reward, build_trs_state(rts[rt], online_ams, t, params["time_step"] + 1)
+                            trs_memory[rt].add_buffer(buffer)
+                            print(tuple(rts[rt].location))
 
-                        (s_batch, s_padding_mask), (s_prime_batch, s_prime_padding_mask) = [build_tensor_state_batch(state_list) for state_list in (s_list, s_prime_list)]
-                        a_batch, r_batch = torch.tensor(a_list, dtype=torch.int32), torch.tensor(r_list, dtype=torch.int32)
+                            if len(trs_memory[rt].memory) >= params["batch_size_trs"]:
+                                s_list, a_list, r_list, s_prime_list = trs_memory[rt].sample()
 
+                                (s_batch, s_padding_mask), (s_prime_batch, s_prime_padding_mask) = [build_tensor_state_batch(state_list) for state_list in (s_list, s_prime_list)]
+                                a_batch, r_batch = torch.tensor(a_list, dtype=torch.int32), torch.tensor(r_list, dtype=torch.int32)
 
-                        with torch.no_grad():
-                            q_primes = trs_target[rt](s_prime_batch, padding_mask=s_prime_padding_mask)
-                            q_primes = q_primes.squeeze(1)
-                            max_q_prime = q_primes.max(dim=-1).values
+                                with torch.no_grad():
+                                    q_primes = trs_target[rt](s_prime_batch, padding_mask=s_prime_padding_mask).squeeze(1)
+                                    max_q_prime = q_primes.max(dim=-1).values
+                                    target = r_batch + params["gamma_trs"] * max_q_prime
+                                q_values = trs[rt](s_batch, padding_mask=s_padding_mask)
+                                q_values = q_values.squeeze(1)
 
-                            target = r_batch + params["gamma_trs"] * max_q_prime
-                        q_values = trs[rt](s_batch, padding_mask=s_padding_mask)
-                        q_values = q_values.squeeze(1)
+                                q_a = q_values.gather(dim=1, index=a_batch.unsqueeze(1)).squeeze(1)
 
-                        q_a = q_values.gather(dim=1, index=a_batch.unsqueeze(1)).squeeze(1)
+                                loss = F.smooth_l1_loss(q_a, target)
+                                crd_optimizer.zero_grad()
+                                loss.backward()
+                                crd_optimizer.step()
 
-                        loss = F.smooth_l1_loss(q_a, target)
-                        crd_optimizer.zero_grad()
-                        loss.backward()
-                        crd_optimizer.step()
-                        # for i in range(params["mini_batch_trs"]):
-                        #     s_batch, s_prime_batch = [build_tensor_state(sample_list[i]) for sample_list in (s_list, s_prime_list)]
-                        #     a_batch, r_batch = torch.tensor([a_list[i]]), torch.tensor(r_list[i])
-                        #     with torch.no_grad():
-                        #         q_primes = trs_target[rt](s_prime_batch)
-                        #         max_q_prime = q_primes.max(dim=1).values
-                        #         target = r_batch + params["gamma_trs"] * max_q_prime
-                        #     q_a = trs[rt](s_batch).gather(1, a_batch.unsqueeze(1))
-                        #     loss = F.smooth_l1_loss(q_a, target)
-                        #
-                        #     trs_optimizer[rt].zero_grad()
-                        #     loss.backward()
-                        #     trs_optimizer[rt].step()
-                    if epoch % 5 == 0:
-                        trs_target[rt].load_state_dict(trs[rt].state_dict())
+                            if trd_epoch % 3 == 0:
+                                trs_target[rt].load_state_dict(trs[rt].state_dict())
 
                 print()
                 print("-" * 50)
             for rt in rts.keys(): rts[rt].initialize()
             for am in ams.keys(): ams[am].initialize()
-            if epoch % 4 == 0:
+            if crd_epoch % 4 == 0:
                 crd_target.load_state_dict(crd.state_dict())
     return
 
@@ -390,7 +389,7 @@ class RT:
         self.refueling = False
 
     def crd_move(self, study_region):
-
+        first_location = self.location.copy()
         angle = math.atan2(self.destination[1] - self.location[1], self.destination[0] - self.location[0])
         vec_x, vec_y = np.array([func(angle) for func in (math.cos, math.sin)]) * self.v_out
 
@@ -413,11 +412,13 @@ class RT:
             else: pass
 
             self.location = [new_x, new_y]
+
+        self.moving_cost += (abs(first_location[0] - self.location[0]) + abs(first_location[1] - self.location[1])) / (self.width + self.length)
         return False
 
-    def trs_move(self, action, m_location, study_region):
-        if action == self.base_directions:
-            pass
+    def trs_move(self, action, study_region):
+        first_location = self.location.copy()
+        if action == self.base_directions: pass
         else:
             vec_x, vec_y = np.array([func(2 * action / self.base_directions * math.pi) for func in (math.cos, math.sin)]) * self.v_out
             for _ in range(10 ** self.scaling_point):
@@ -443,7 +444,7 @@ class RT:
 
                 self.location = [new_x, new_y]
         self.location = [round(loc, self.scaling_point) for loc in self.location]
-        return sum(calculate_distance(self.location, loc) for loc in m_location)
+        self.moving_cost += (abs(first_location[0] - self.location[0]) + abs(first_location[1] - self.location[1])) / (self.width + self.length)
 
 class AM:
     def __init__(self, records, request_mean, request_std, consuming, fuel_mean, fuel_std):
@@ -455,7 +456,7 @@ class AM:
         self.request_threshold = random.normalvariate(request_mean, request_std) * self.max_fuel
 
         self.request = -1
-        self.w_waiting_st = 0
+        self.w_waiting = 0
         self.accumulated_working_time = 0
         self.last_refueling_time = 0
         self.refueling_amount = 0
@@ -467,7 +468,7 @@ class AM:
 
     def initialize(self):
         self.request = -1
-        self.w_waiting_st = 0
+        self.w_waiting = 0
         self.accumulated_working_time = 0
         self.last_refueling_time = 0
         self.refueling_amount = 0
@@ -475,18 +476,17 @@ class AM:
 
         self.stopped = 0
 
-    def step(self, t):
+    def step(self):
         if not self.refueling:
             if self.fuel > 0:
                 self.accumulated_working_time += 1
                 self.fuel = max(0, self.fuel - self.consuming)
             else:
-                if self.w_waiting_st == 0:
-                    self.w_waiting_st = t
+                self.w_waiting += 1
 
             if self.fuel <= self.request_threshold:
                 self.request += 1
-        else:
+        if self.refueling or self.fuel == 0:
             self.stopped += 1
 
 def start(refueling_tankers, study_region, set_region, platform, params1, params2, csv_path):
@@ -550,7 +550,7 @@ def main():
         (35.46585266, 35.49610145, 116.91805657, 116.94853584)]
 
     params1 = {"request_mean": request_mean, "request_std": request_std, "consuming": consuming, "fuel_mean": fuel_mean, "fuel_std": fuel_std}
-    params2 = {"crd_epoch": 3, "trs_epoch": 5, "w_s": 0.8, "w_c": 0.6, "w_waiting": 0.3, "w_d": 0.4, "w_r": 0.6, "scaling_point": scaling_point, "time_step": min(288, max(0, time_step)),
+    params2 = {"crd_epoch": 3, "trs_epoch": 10, "w_s": 0.3, "w_c": 0.6, "w_waiting": 0.3, "w_d": 0.4, "w_r": 0.6, "scaling_point": scaling_point, "time_step": min(288, max(0, time_step)),
               "in_dim_crd": 16, "hidden1_dim_crd": 64, "hidden2_dim_crd": 32, "hidden3_dim_crd": 16, "hidden4_dim_crd": 8, "out_dim_crd": 1,
               "in_dim_trs": 11, "embed_dim_trs": 16, "num_heads_dim_trs": 16, "hidden1_dim_trs": 2, "hidden2_dim_trs": 4, "out_dim_trs": num_base_directions,
               "max_len_crd": 50, "batch_size_crd": 20, "mini_batch_crd": 20, "crd_lr": 0.05, "gamma_crd": 0.05,
