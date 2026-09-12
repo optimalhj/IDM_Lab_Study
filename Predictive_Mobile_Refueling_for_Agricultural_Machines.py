@@ -24,9 +24,7 @@ class CentralRequestDispatcher(nn.Module):
     def forward(self, x, padding_mask=None):
         x = self.layer1(x, src_key_padding_mask=padding_mask)
         x = F.relu(x)
-
         x = self.layer2(x)
-        x = F.relu(x)
         return x
 
 class TankerRepositionScheduler(nn.Module):
@@ -44,8 +42,10 @@ class TankerRepositionScheduler(nn.Module):
         x = F.relu(x)
         x = self.layer1(x)
         x = F.relu(x)
-        x, _ = self.layer2(x, x, x)
+        x, _ = self.layer2(x, x, x, key_padding_mask=padding_mask)
 
+        valid = (-padding_mask).unsqueeze(-1)
+        x = (x * valid).sum(dim=1, keepdim=True) / valid.sum(dim=1, keepdim=True)
         x = torch.mean(x, dim=1, keepdim=True)
 
         x = self.layer3(x)
@@ -161,8 +161,8 @@ def regulated_profit(w_s, w_c, rts, w_waiting, online_ams):
 
 def trs_energy_calculator(w_d, rts_location, ams_locations):
     potential_energy = 0
-    for ams_x, ams_y in ams_locations:
-        potential_energy += math.exp(-w_d * abs(ams_x + ams_y - rts_location[0] - rts_location[1]))
+    for am_location in ams_locations:
+        potential_energy += math.exp(-w_d * calculate_distance(rts_location, am_location))
     return potential_energy
 
 def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, max_group_id):
@@ -225,7 +225,7 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
                     for state in crd_state:
                         print("\t", state)
 
-                    if i < 0.88:
+                    if i > 0.88:
                         crd_action = random.randint(0, len(crd_state) - 1)
                     else:
                         crd_state_tensor = build_tensor_state(crd_state)
@@ -321,7 +321,7 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
                             energy_before = trs_energy_calculator(params["w_d"], rts[rt].location, [online_ams[am].location(t) for am in online_ams if online_ams[am].request == -1])
                             rts[rt].trs_move(action=trs_action.argmax().item(), study_region=study_region)
                             energy_after = trs_energy_calculator(params["w_d"], rts[rt].location, [online_ams[am].location(t) for am in online_ams if online_ams[am].request == -1])
-                            r_pei = -(energy_after - energy_before)
+                            r_pei = energy_after - energy_before
                             p_envi = regulated_profit(params["w_s"], params["w_c"], {rt: rts[rt]}, params["w_waiting"], online_ams)
                             reward = p_envi + params["w_r"] * r_pei
                             buffer = trs_state, trs_action.argmax().item(), reward, build_trs_state(rts[rt], online_ams, t, params["time_step"] + 1)
@@ -344,9 +344,9 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
                                 q_a = q_values.gather(dim=1, index=a_batch.unsqueeze(1)).squeeze(1)
 
                                 loss = F.smooth_l1_loss(q_a, target)
-                                crd_optimizer.zero_grad()
+                                trs_optimizer[rt].zero_grad()
                                 loss.backward()
-                                crd_optimizer.step()
+                                trs_optimizer[rt].step()
 
                             if trd_epoch % 3 == 0:
                                 trs_target[rt].load_state_dict(trs[rt].state_dict())
@@ -473,7 +473,7 @@ class AM:
         self.last_refueling_time = 0
         self.refueling_amount = 0
         self.refueling = False
-
+        self.fuel = self.max_fuel
         self.stopped = 0
 
     def step(self):
