@@ -6,67 +6,178 @@ def lot_stream(process, deliver, boms, ini_set, params):
 
     md = cp_model.CpModel()
 
-    factory_num_jobs, product_property, ingredient_property, making_t, lot_assigned = {}, {}, {}, {}, {}
-    intervals, sts, eds, mks = {}, {}, {}, {}
+    fc_wip_t = {}
     for fc in ini_set.keys():
-        factory_num_jobs[fc], product_property[fc], ingredient_property[fc], making_t[fc], lot_assigned[fc] = {}, {}, {}, {}, {}
-        intervals[fc], sts[fc], eds[fc], mks[fc] = {}, {}, {}, {}
+        fc_wip_t[fc] = {}
         for jt in ini_set[fc].keys():
-            factory_num_jobs[fc][jt], product_property[fc][jt], making_t[fc][jt], lot_assigned[fc][jt] = md.new_int_var(0, horizon, f"{fc}_{jt}"), {}, {}, {lot_unit: {} for lot_unit in ini_set[fc][jt] + ["Not_Assigned"]}
-            for t in range(horizon):
-                product_property[fc][jt][t] = md.new_int_var(0, horizon, f"{fc}_{jt}_{t}_product")
-                making_t[fc][jt][t] = md.new_bool_var(f"{fc}_{jt}_{t}")
-                for lot_unit in lot_assigned[fc][jt].keys():
-                    lot_assigned[fc][jt][lot_unit][t] = md.new_int_var(0, horizon, f"{fc}_{jt}_{t}_{lot_unit}")
+            fc_wip_t[fc][jt] = {}
             if jt in boms:
-                ingredient_property[fc][jt] = {ingredient: {t: md.new_int_var(0, horizon, f"{fc}_{ingredient}_{t}_for_{jt}") for t in range(horizon)} for ingredient in boms[jt]}
+                for ingredient in boms[jt]:
+                    if ingredient not in fc_wip_t[fc]: fc_wip_t[fc][ingredient] = {}
+        for wip in fc_wip_t[fc].keys():
+            fc_wip_t[fc][wip][0] = 0
+            for t in range(1, horizon):
+                fc_wip_t[fc][wip][t] = md.new_int_var(0, horizon, f"{fc}_{wip}_{t}")
 
-            intervals[fc][jt], sts[fc][jt], eds[fc][jt], mks[fc][jt] = [], [], [], []
+    sem, intervals = {}, {} # Start End Make => Interval
+    produced, consumed = {}, {}
+    for fc in ini_set.keys():
+        sem[fc] = {}
+        intervals[fc] = {}
+        produced[fc] = {}
+        consumed[fc] = {}
 
-            for k in range(horizon//10):
-                st, ed, mk = md.new_int_var(0, horizon, f"{fc}_{jt}_{k + 1}_sts"), md.new_int_var(0, horizon, f"{fc}_{jt}_{k + 1}_eds"), md.new_bool_var(f"{fc}_{jt}_{k + 1}th_mks")
-                for t_start in range(horizon - getattr(process, f"{fc}{jt}")):
-                    start_match = md.new_bool_var(f"{fc}_{jt}_{k + 1}_{t_start}start_match")
-                    md.add(st == t_start).only_enforce_if(start_match)
-                    md.add(st != t_start).only_enforce_if(start_match.Not())
-                    for t_doing in range(getattr(process, f"{fc}{jt}")):
-                        md.add(making_t[fc][jt][t_start + t_doing] == 1).only_enforce_if([mk, start_match])
+        for jt in ini_set[fc].keys():
+            sem[fc][jt] = {}
+            intervals[fc][jt] = {}
+            produced[fc][jt] = {t: md.new_bool_var(f"{fc}_{jt}_{t}_produced") for t in range(horizon)}
+            if jt in boms:
+                consumed[fc][jt] = {ingredient: {t: md.new_int_var(0, boms[jt][ingredient], f"{fc}_{ingredient}_{t}_consumed") for t in range(horizon)} for ingredient in boms[jt].keys()}
 
-                sts[fc][jt].append(st)
-                eds[fc][jt].append(ed)
-                mks[fc][jt].append(mk)
-                intervals[fc][jt].append(md.new_optional_interval_var(st, getattr(process, f"{fc}{jt}"), ed, mk, f"{fc}_{jt}_{k + 1}th_mks"))
+            for k in range(horizon // 10):
+                sem[fc][jt][k] = [md.new_int_var(0, horizon, f"{fc}_{jt}_{k}_st"), md.new_int_var(0, horizon, f"{fc}_{jt}_{k}_ed"), md.new_bool_var(f"{fc}_{jt}_{k}_mk")]
+                intervals[fc][jt][k] = md.new_optional_interval_var(sem[fc][jt][k][0], getattr(process, f"{fc}{jt}"), sem[fc][jt][k][1], sem[fc][jt][k][2], f"{fc}_{jt}_{k}_make")
+
                 if k:
-                    md.add(eds[fc][jt][k-1] <= sts[fc][jt][k])
-                    md.add(mks[fc][jt][k-1] >= mks[fc][jt][k])
-            md.add_no_overlap(intervals[fc][jt])
-            md.add(sum(mks[fc][jt]) == factory_num_jobs[fc][jt])
+                    md.add(sem[fc][jt][k - 1][2] >= sem[fc][jt][k][2])
+                    md.add(sem[fc][jt][k - 1][1] <= sem[fc][jt][k][0])
 
-            for t in range(horizon):
-                produce = md.new_int_var(0, horizon, f"produce{fc}{jt}{t}")
-                consume = md.new_int_var(0, horizon, f"consume{fc}{jt}{t}")
-                if t:
-                    md.add(product_property[fc][jt][t] == product_property[fc][jt][t - 1] + produce - consume)
-                else: md.add(product_property[fc][jt][t] == 0)
+                for t in range(getattr(process, f"{fc}{jt}"), horizon//10):
+                    same_end = md.new_bool_var(f"{fc}{jt}{k}_end_{t}")
+                    md.add(sem[fc][jt][k][1] == t).only_enforce_if(same_end)
+                    md.add(sem[fc][jt][k][1] != t).only_enforce_if(same_end.Not())
+
+                    md.add(produced[fc][jt][t] == sem[fc][jt][k][2]).only_enforce_if(same_end)
+                    md.add(produced[fc][jt][t] == 0).only_enforce_if(same_end.Not())
 
                 if jt in boms:
-                    ingredient_ready = {}
-                    for ingredient in boms[jt]:
-                        ingredient_ready[ingredient] = md.new_bool_var(f"ready_to_make_{ingredient}")
-                        md.add(ingredient_property[fc][jt][ingredient][t] >= boms[jt][ingredient]).only_enforce_if(ingredient_ready[ingredient])
-                        md.add(ingredient_property[fc][jt][ingredient][t] < boms[jt][ingredient]).only_enforce_if(ingredient_ready[ingredient].Not())
-                    md.add(sum(ingredient_ready.values()) < len(ingredient_ready)).only_enforce_if(making_t[fc][jt][t].Not())
+                    for t in range(horizon//10 - getattr(process, f"{fc}{jt}")):
+                        same_start = md.new_bool_var(f"{fc}{jt}{k}_start_{t}")
+                        md.add(sem[fc][jt][k][0] == t).only_enforce_if(same_start)
+                        md.add(sem[fc][jt][k][0] != t).only_enforce_if(same_start.Not())
+                        for ingredient in consumed[fc][jt].keys():
 
+                            md.add(consumed[fc][jt][ingredient][t] == boms[jt][ingredient] * sem[fc][jt][k][2]).only_enforce_if(same_start)
+                            md.add(consumed[fc][jt][ingredient][t] == 0).only_enforce_if(same_start.Not())
+            md.add_no_overlap(intervals[fc][jt].values())
+
+    delivered, delivering = {}, {}
+    for fc in fc_wip_t.keys():
+        delivered[fc] = {}
+        delivering[fc] = {}
+        for wip in fc_wip_t[fc].keys():
+            delivered[fc][wip] = {}
+            delivering[fc][wip] = {}
+            for t in range(horizon):
+                delivered[fc][wip][t] = md.new_int_var(0, horizon // 10, f"{fc}_{wip}_{t}")
+                delivering[fc][wip][t] = md.new_int_var(0, horizon // 10, f"{fc}_{wip}_{t}")
+
+    plus, minus = {}, {}
+    for fc in fc_wip_t.keys():
+        print(fc)
+        plus[fc] = {}
+        minus[fc] = {}
+        for wip in fc_wip_t[fc].keys():
+            plus[fc][wip] = {}
+            minus[fc][wip] = {}
+            for t in range(horizon):
+                plus[fc][wip][t] = md.new_int_var(0, horizon // 10, f"{fc}_{wip}_{t}_plus")
+                minus[fc][wip][t] = md.new_int_var(0, horizon // 10, f"{fc}_{wip}_{t}_minus")
+
+                md.add(plus[fc][wip][t] == (produced[fc][wip].get(t, 0) if wip in produced[fc] else 0) + delivered[fc][wip][t])
+                md.add(minus[fc][wip][t] == sum(consumed[fc_prime][wip].get(t, 0) if wip in consumed[fc_prime] else 0 for fc_prime in consumed) + delivering[fc][wip][t])
+                if t:
+                    md.add(fc_wip_t[fc][wip][t - 1] + plus[fc][wip][t - 1] - minus[fc][wip][t - 1] == fc_wip_t[fc][wip][t])
+
+    every_final_product_max_set = {}
+    for fc in ini_set.keys():
+        if params["final_product"] in fc_wip_t[fc]:
+            every_final_product_max_set[fc] = md.new_int_var(0, params["amount"], f"{fc}_FP")
+            md.add_max_equality(every_final_product_max_set[fc], fc_wip_t[fc][params["final_product"]].values())
+    md.add(sum(every_final_product_max_set.values()) >= params["amount"])
 
     total_makespan = md.new_int_var(0, horizon, "total_makespan")
-    md.add_max_equality(total_makespan, [ed for fc in ini_set.keys() for jt in ini_set[fc].keys() for ed in eds[fc][jt]])
+    md.add_max_equality(total_makespan, [sem[fc][jt][k][1] for fc in sem.keys() for jt in sem[fc].keys() for k in range(horizon // 10)])
     md.minimize(total_makespan)
 
     solver = cp_model.CpSolver()
     status = solver.Solve(md)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         print("O")
+        # for fc in fc_wip_t.keys():
+        #     print(fc)
+        #     for wip in fc_wip_t[fc].keys():
+        #         print(wip)
+        #         print([fc_wip_t[fc][wip][t] for t in range(horizon)])
     return
+
+#
+# def lot_stream(process, deliver, boms, ini_set, params):
+#     horizon = params["horizon"]
+#
+#     md = cp_model.CpModel()
+#
+#     factory_num_jobs, product_property, ingredient_property, making_t, lot_assigned = {}, {}, {}, {}, {}
+#     intervals, sts, eds, mks = {}, {}, {}, {}
+#     for fc in ini_set.keys():
+#         factory_num_jobs[fc], product_property[fc], ingredient_property[fc], making_t[fc], lot_assigned[fc] = {}, {}, {}, {}, {}
+#         intervals[fc], sts[fc], eds[fc], mks[fc] = {}, {}, {}, {}
+#         for jt in ini_set[fc].keys():
+#             factory_num_jobs[fc][jt], product_property[fc][jt], making_t[fc][jt], lot_assigned[fc][jt] = md.new_int_var(0, horizon, f"{fc}_{jt}"), {}, {}, {lot_unit: {} for lot_unit in ini_set[fc][jt] + ["Not_Assigned"]}
+#             for t in range(horizon):
+#                 product_property[fc][jt][t] = md.new_int_var(0, horizon, f"{fc}_{jt}_{t}_product")
+#                 making_t[fc][jt][t] = md.new_bool_var(f"{fc}_{jt}_{t}")
+#                 for lot_unit in lot_assigned[fc][jt].keys():
+#                     lot_assigned[fc][jt][lot_unit][t] = md.new_int_var(0, horizon, f"{fc}_{jt}_{t}_{lot_unit}")
+#             if jt in boms:
+#                 ingredient_property[fc][jt] = {ingredient: {t: md.new_int_var(0, horizon, f"{fc}_{ingredient}_{t}_for_{jt}") for t in range(horizon)} for ingredient in boms[jt]}
+#
+#             intervals[fc][jt], sts[fc][jt], eds[fc][jt], mks[fc][jt] = [], [], [], []
+#
+#             for k in range(horizon//10):
+#                 st, ed, mk = md.new_int_var(0, horizon, f"{fc}_{jt}_{k + 1}_sts"), md.new_int_var(0, horizon, f"{fc}_{jt}_{k + 1}_eds"), md.new_bool_var(f"{fc}_{jt}_{k + 1}th_mks")
+#                 for t_start in range(horizon - getattr(process, f"{fc}{jt}")):
+#                     start_match = md.new_bool_var(f"{fc}_{jt}_{k + 1}_{t_start}start_match")
+#                     md.add(st == t_start).only_enforce_if(start_match)
+#                     md.add(st != t_start).only_enforce_if(start_match.Not())
+#                     for t_doing in range(getattr(process, f"{fc}{jt}")):
+#                         md.add(making_t[fc][jt][t_start + t_doing] == 1).only_enforce_if([mk, start_match])
+#
+#                 sts[fc][jt].append(st)
+#                 eds[fc][jt].append(ed)
+#                 mks[fc][jt].append(mk)
+#                 intervals[fc][jt].append(md.new_optional_interval_var(st, getattr(process, f"{fc}{jt}"), ed, mk, f"{fc}_{jt}_{k + 1}th_mks"))
+#                 if k:
+#                     md.add(eds[fc][jt][k-1] <= sts[fc][jt][k])
+#                     md.add(mks[fc][jt][k-1] >= mks[fc][jt][k])
+#             md.add_no_overlap(intervals[fc][jt])
+#             md.add(sum(mks[fc][jt]) == factory_num_jobs[fc][jt])
+#
+#             for t in range(horizon):
+#                 produce = md.new_int_var(0, horizon, f"produce{fc}{jt}{t}")
+#                 consume = md.new_int_var(0, horizon, f"consume{fc}{jt}{t}")
+#                 if t:
+#                     md.add(product_property[fc][jt][t] == product_property[fc][jt][t - 1] + produce - consume)
+#                 else: md.add(product_property[fc][jt][t] == 0)
+#
+#                 if jt in boms:
+#                     ingredient_ready = {}
+#                     for ingredient in boms[jt]:
+#                         ingredient_ready[ingredient] = md.new_bool_var(f"ready_to_make_{ingredient}")
+#                         md.add(ingredient_property[fc][jt][ingredient][t] >= boms[jt][ingredient]).only_enforce_if(ingredient_ready[ingredient])
+#                         md.add(ingredient_property[fc][jt][ingredient][t] < boms[jt][ingredient]).only_enforce_if(ingredient_ready[ingredient].Not())
+#                     md.add(sum(ingredient_ready.values()) < len(ingredient_ready)).only_enforce_if(making_t[fc][jt][t].Not())
+#
+#
+#     total_makespan = md.new_int_var(0, horizon, "total_makespan")
+#     md.add_max_equality(total_makespan, [ed for fc in ini_set.keys() for jt in ini_set[fc].keys() for ed in eds[fc][jt]])
+#     md.minimize(total_makespan)
+#
+#     solver = cp_model.CpSolver()
+#     status = solver.Solve(md)
+#     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+#         print("O")
+#     return
 
 class Process:
     def __init__(self): pass
@@ -180,7 +291,6 @@ def main():
     fcs = list(factories)
     random.seed(4233)
     deliveries = {fc1: {fc2 : random.randint(1, 5) if fc1 != fc2 else 0 for fc2 in fcs } for fc1 in fcs}
-    print("-----------------------------------------------------------------------------------------------------")
     start(boms, factories, deliveries, params)
 
 if __name__ == "__main__":
