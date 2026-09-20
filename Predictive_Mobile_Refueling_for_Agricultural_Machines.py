@@ -8,7 +8,6 @@ import numpy as np
 from collections import deque
 import random
 import math
-from copy import deepcopy
 
 from dataset import find_dataset
 rt_additional = "RT"
@@ -147,14 +146,14 @@ def build_trs_state(rts, ams, t, max_time):
 def build_tensor_state(crd_state):
     return torch.Tensor(crd_state).unsqueeze(0)
 
-def build_tensor_state_batch(state_list):
+def build_tensor_state_batch(state_list, device):
     tensors = [torch.as_tensor(state, dtype=torch.float32) for state in state_list]
     lengths = torch.tensor([state.shape[0] for state in tensors], dtype=torch.long)
     states = pad_sequence(tensors, batch_first=True, padding_value=0.0)
 
     max_len = states.size(1)
     padding_mask = (torch.arange(max_len).unsqueeze(0) >= lengths.unsqueeze(1))
-    return states, padding_mask
+    return states.to(device), padding_mask.to(device)
 
 def regulated_profit(w_s, w_c, rts, w_waiting, online_ams):
     return w_s * sum(rts[rt].total_fuel_supply for rt in rts.keys()) - w_c * sum(rts[rt].moving_cost for rt in rts.keys()) - w_waiting * sum(online_ams[am].w_waiting for am in online_ams)
@@ -165,19 +164,18 @@ def trs_energy_calculator(w_d, rts_location, ams_locations):
         potential_energy += math.exp(-w_d * calculate_distance(rts_location, am_location))
     return potential_energy
 
-def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, max_group_id):
-    crd = CentralRequestDispatcher(params["in_dim_crd"], params["hidden1_dim_crd"], params["hidden2_dim_crd"], params["hidden3_dim_crd"], params["hidden4_dim_crd"], params["out_dim_crd"])
-    crd_target = deepcopy(crd)
-    trs = {rt: TankerRepositionScheduler(params["in_dim_trs"], params["embed_dim_trs"], params["num_heads_dim_trs"], params["hidden1_dim_trs"], params["hidden2_dim_trs"], params["out_dim_trs"]) for rt in rts.keys()}
-    trs_target = deepcopy(trs)
+def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, max_group_id, device=torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")):
+    crd, crd_target = [CentralRequestDispatcher(params["in_dim_crd"], params["hidden1_dim_crd"], params["hidden2_dim_crd"], params["hidden3_dim_crd"], params["hidden4_dim_crd"], params["out_dim_crd"]).to(device) for _ in range(2)]
     crd_target.load_state_dict(crd.state_dict())
     crd_target.eval()
-    for rt in rts.keys():
-        trs_target[rt].load_state_dict(trs[rt].state_dict())
-        trs_target[rt].eval()
     crd_optimizer, crd_memory = optim.Adam(crd.parameters(), lr=params["crd_lr"]), ReplayMemory(max_len=params["max_len_crd"], sample_size=params["mini_batch_crd"])
+
+    trs, trs_target = {}, {}
     trs_optimizer, trs_memory = {}, {}
     for rt in rts.keys():
+        trs[rt], trs_target[rt] = [TankerRepositionScheduler(params["in_dim_trs"], params["embed_dim_trs"], params["num_heads_dim_trs"], params["hidden1_dim_trs"], params["hidden2_dim_trs"], params["out_dim_trs"]).to(device) for _ in range(2)]
+        trs_target[rt].load_state_dict(trs[rt].state_dict())
+        trs_target[rt].eval()
         trs_optimizer[rt], trs_memory[rt] = optim.Adam(trs[rt].parameters(), lr=params["trs_lr"]), ReplayMemory(max_len=params["max_len_trs"], sample_size=params["mini_batch_trs"])
     print("\n----------Start----------")
 
@@ -228,7 +226,7 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
                     if i > 0.88:
                         crd_action = random.randint(0, len(crd_state) - 1)
                     else:
-                        crd_state_tensor = build_tensor_state(crd_state)
+                        crd_state_tensor = build_tensor_state(crd_state).to(device)
                         with torch.no_grad():
                             crd_action = crd(crd_state_tensor).argmax().item()
                     i *= 0.99
@@ -263,7 +261,7 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
                 if len(crd_memory.memory) >= params["batch_size_crd"]:
                     s_list, a_list, r_list, s_prime_list = crd_memory.sample()
 
-                    (s_batch, s_padding_mask), (s_prime_batch, s_prime_padding_mask) = [build_tensor_state_batch(state_list) for state_list in (s_list, s_prime_list)]
+                    (s_batch, s_padding_mask), (s_prime_batch, s_prime_padding_mask) = [build_tensor_state_batch(state_list, device=device) for state_list in (s_list, s_prime_list)]
                     a_batch, r_batch = torch.tensor(a_list, dtype=torch.int32), torch.tensor(r_list, dtype=torch.int32)
 
                     with torch.no_grad():
@@ -276,7 +274,6 @@ def predictive_mobile_refuel(rts, ams_total, study_region, set_region, params, m
                     q_values = q_values.squeeze(-1)
 
                     q_a = q_values.gather(dim=1, index=a_batch.unsqueeze(1)).squeeze(1)
-                    # q_a = crd(s_batch)[0, a_batch]
                     loss = F.smooth_l1_loss(q_a, target)
                     crd_optimizer.zero_grad()
                     loss.backward()
@@ -573,6 +570,7 @@ def main():
     set_region = InitialStudyRegion(row_nums, col_nums)
     set_region.show(study_region)
     using_csv = "train" if dispatch_training or reposition_training else "test"
+
     start(refueling_tankers, study_region, set_region, platform, params1, params2, saved_path / f"{using_csv}.csv")
 
 if __name__ == '__main__':
