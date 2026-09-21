@@ -25,9 +25,10 @@ class Qnet(nn.Module):
         return x
 
 class ReplayMemory:
-    def __init__(self, max_len, sample_size):
+    def __init__(self, max_len, sample_size, device):
         self.memory = deque(maxlen=max_len)
         self.sample_size = sample_size
+        self.device = device
     def add_buffer(self, buffer):
         self.memory.append(buffer)
     def sample(self):
@@ -38,7 +39,7 @@ class ReplayMemory:
             r_batch.append([r])
             s_prime_batch.append([s_prime[0]/8] + [s_prime[1]/5] + s_prime[2:])
             done_batch.append([done])
-        return torch.tensor(s_batch, dtype=torch.float), torch.tensor(a_batch, dtype=torch.long), torch.tensor(r_batch, dtype=torch.float), torch.tensor(s_prime_batch, dtype=torch.float), torch.tensor(done_batch, dtype=torch.float)
+        return torch.tensor(s_batch, dtype=torch.float, device=self.device), torch.tensor(a_batch, dtype=torch.long, device=self.device), torch.tensor(r_batch, dtype=torch.float, device=self.device), torch.tensor(s_prime_batch, dtype=torch.float, device=self.device), torch.tensor(done_batch, dtype=torch.float, device=self.device)
 
 def state(point):
     able = [1, 1, 1, 1]
@@ -95,15 +96,16 @@ def step(action, point):
             move_succeed = True
     return move_succeed
 def start():
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     coordinates = {x: {y: {0:0, 1:0, 2:0, 3:0} if x != 8 or y != 1 else "G" for y in range(1, 6)} for x in range(1, 9)}
     for y in range(3, 6): coordinates[3][y] = "N"
     for y in range(1, 4): coordinates[6][y] = "N"
-    qnet, qnet_target = [Qnet() for _ in range(2)]
+    qnet, qnet_target = [Qnet().to(device) for _ in range(2)]
     qnet_target.load_state_dict(qnet.state_dict())
     qnet_target.eval()
     optimizer = optim.Adam(qnet.parameters(), lr=0.001)
 
-    memory = ReplayMemory(max_len=2000, sample_size=150)
+    memory = ReplayMemory(max_len=2000, sample_size=150, device=device)
     epsilon = 1
     entire_count = {}
     for epoch in range(5000):
@@ -112,7 +114,7 @@ def start():
         while not done:
             state_list = state(point.copy())
             with torch.no_grad():
-                action = qnet(torch.tensor(state_scaling(state_list), dtype=torch.float)).argmax().item() if random.random() > epsilon else random.randint(0, 3)
+                action = qnet(torch.tensor(state_scaling(state_list), dtype=torch.float).to(device)).argmax().item() if random.random() > epsilon else random.randint(0, 3)
             move_succeed = step(action, point)
             state_prime_list = state(point.copy())
 
