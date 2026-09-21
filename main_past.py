@@ -20,6 +20,19 @@ def lot_stream(process, deliver, boms, ini_set, params):
             for t in range(1, horizon):
                 fc_wip_t[fc][wip][t] = md.new_int_var(0, horizon, f"{fc}_{wip}_{t}")
 
+    delivered = {}
+    for fc in ini_set.keys():
+        print(fc)
+        delivered[fc] = {}
+        for jt in ini_set[fc].keys():
+            if jt in boms:
+                print(jt)
+                for ingredient in boms[jt]:
+                    make_ingredient_fc = [fc_prime for fc_prime in ini_set.keys() if ingredient in ini_set[fc_prime]]
+                    print(ingredient, make_ingredient_fc)
+                    delivered[fc][ingredient] = {fc_prime: {t: md.new_int_var(0, job_interval_horizon, f"{fc}_{ingredient}_{t}_delivered") for t in range(1, horizon)} for fc_prime in make_ingredient_fc}
+
+
     sem, intervals = {}, {} # Start End Make => Interval
     produced, consumed = {}, {}
     for fc in ini_set.keys():
@@ -37,78 +50,79 @@ def lot_stream(process, deliver, boms, ini_set, params):
             if jt in boms:
                 consumed[fc][jt] = {ingredient: {t: md.new_int_var(0, boms[jt][ingredient], f"{fc}_{ingredient}_{t}_consumed") for t in range(1, horizon)} for ingredient in boms[jt].keys()}
 
-            start_event, end_event, processing = {}, {}, getattr(process, f"{fc}{jt}")
+            se_event = {}
             for k in range(job_interval_horizon):
-                print(k)
-                start_event[k], end_event[k] = {}, {}
+                se_event[k] = {}
                 sem[fc][jt][k] = [md.new_int_var(1, horizon, f"{fc}_{jt}_{k}_st"), md.new_int_var(1, horizon, f"{fc}_{jt}_{k}_ed"), md.new_bool_var(f"{fc}_{jt}_{k}_mk")]
-                for t in range(1, horizon):
-                    if jt in boms:
-                        for ingredient in boms[jt]:
-                            md.add(fc_wip_t[fc][jt][t - 1] >= boms[jt][ingredient]).only_enforce_if(sem[fc][jt][k][2])
-                intervals[fc][jt][k] = md.new_optional_interval_var(sem[fc][jt][k][0], processing, sem[fc][jt][k][1], sem[fc][jt][k][2], f"{fc}_{jt}_{k}_make")
+                intervals[fc][jt][k] = md.new_optional_interval_var(sem[fc][jt][k][0], getattr(process, f"{fc}{jt}"), sem[fc][jt][k][1], sem[fc][jt][k][2], f"{fc}_{jt}_{k}_make")
 
                 if k:
                     md.add(sem[fc][jt][k - 1][2] >= sem[fc][jt][k][2])
                     md.add(sem[fc][jt][k - 1][1] <= sem[fc][jt][k][0])
 
                 for t in range(1, horizon):
-                    start_event[k][t] = md.new_bool_var(f"{fc}{jt}{k}_start_{t}")
-                    md.add(sem[fc][jt][k][0] == t).only_enforce_if(start_event[k][t])
-                    md.add(sem[fc][jt][k][0] != t).only_enforce_if(start_event[k][t].Not())
+                    se_event[k][t] = [md.new_bool_var(f"{fc}{jt}{k}_{when}_{t}") for when in ("start", "end","real_start","real_end")]
+                    md.add(sem[fc][jt][k][0] == t).only_enforce_if(se_event[k][t][0])
+                    md.add(sem[fc][jt][k][0] != t).only_enforce_if(se_event[k][t][0].Not())
 
-                    end_event[k][t] = md.new_bool_var(f"{fc}{jt}{k}_end_{t}")
-                    md.add(sem[fc][jt][k][1] == t).only_enforce_if(end_event[k][t])
-                    md.add(sem[fc][jt][k][1] != t).only_enforce_if(end_event[k][t].Not())
+                    md.add(sem[fc][jt][k][1] == t).only_enforce_if(se_event[k][t][1])
+                    md.add(sem[fc][jt][k][1] != t).only_enforce_if(se_event[k][t][1].Not())
+
+                    md.add_min_equality(se_event[k][t][2], [se_event[k][t][0], sem[fc][jt][k][2]])
+                    md.add_min_equality(se_event[k][t][3], [se_event[k][t][1], sem[fc][jt][k][2]])
+
+                if jt in boms:
+                    for ingredient in boms[jt]:
+                        for t in range(1, horizon):
+                            md.add(fc_wip_t[fc][ingredient][t - 1] + sum(delivered[fc][ingredient][fc_prime][t] for fc_prime in ini_set.keys() if ingredient in ini_set[fc_prime]) >= boms[jt][ingredient]).only_enforce_if(se_event[k][t][2])
 
             md.add_no_overlap(intervals[fc][jt].values())
 
-            for k in range(job_interval_horizon):
-                for t in range(1, horizon):
-                    md.add(produced[fc][jt][t] == 1).only_enforce_if([sem[fc][jt][k][2], end_event[k][t]])
-                    md.add(produced[fc][jt][t] == 0).only_enforce_if(sem[fc][jt][k][2].Not())
-                    md.add(produced[fc][jt][t] == 0).only_enforce_if(end_event[k][t].Not())
-
             if jt in boms:
                 for ingredient in boms[jt].keys():
-                    for k in range(job_interval_horizon):
-                        for t in range(1, horizon):
-                            md.add(consumed[fc][jt][ingredient][t] == boms[jt][ingredient]).only_enforce_if([sem[fc][jt][k][2], start_event[k][t]])
-                            md.add(consumed[fc][jt][ingredient][t] == 0).only_enforce_if(sem[fc][jt][k][2].Not())
-                            md.add(consumed[fc][jt][ingredient][t] == 0).only_enforce_if(start_event[k][t].Not())
+                    for t in range(1, horizon):
+                        md.add(consumed[fc][jt][ingredient][t] == boms[jt][ingredient] * sum(se_event[k][t][2] for k in range(job_interval_horizon)))
 
-    delivered, delivering = {}, {}
-    for fc in ini_set.keys():
-        delivered[fc] = {}
-        delivering[fc] = {}
-
-        for jt in ini_set[fc].keys():
-            use_jt_fc = [fc_prime for fc_prime in ini_set.keys() for jt_prime in ini_set[fc_prime].keys() if jt_prime in boms for ingredient in boms[jt].keys() if ingredient == jt]
-            delivered[fc][jt] = {lot_unit: md.new_int_var(0, job_interval_horizon, f"{fc}_{jt}_{lot_unit}_delivering") for lot_unit in ini_set[fc][jt]}
-
-
-        for wip in ini_set[fc].keys():
-            delivering[fc][wip] = {}
             for t in range(1, horizon):
-                delivered[fc][wip][t] = md.new_int_var(0, horizon // 10, f"{fc}_{wip}_{t}_delivered")
-                delivering[fc][wip][t] = md.new_int_var(0, horizon // 10, f"{fc}_{wip}_{t}_delivering")
+                md.add(produced[fc][jt][t] == 1 * sum(se_event[k][t][3] for k in range(job_interval_horizon)))
 
+    print("Delivering")
+    delivering = {}
+    for fc in ini_set.keys():
+        print(fc)
+        delivering[fc] = {}
+        for jt in ini_set[fc].keys():
+            print(jt)
+            delivering[fc][jt] = {}
+            use_ingredient_fc, lot_units = set([fc_prime for fc_prime in ini_set.keys() for jt_prime in ini_set[fc_prime] if jt_prime in boms and jt in boms[jt_prime]]), ini_set[fc][jt]
+            for t in range(1, horizon):
+                delivering[fc][jt][t] = {}
+                for fc_prime in use_ingredient_fc:
+                    delivering[fc][jt][t][fc_prime] = {}
+                    for lot_unit in lot_units:
+                        delivering[fc][jt][t][fc_prime][lot_unit] = md.new_int_var(0, horizon // 10, f"{fc}_{jt}_{t}_deliver_to_{fc_prime}_{lot_unit}")
 
+            for fc_prime in use_ingredient_fc:
+                deliver_time = getattr(deliver, f"{fc}{fc_prime}")
+                for t in range(1, horizon - deliver_time):
+                    md.add(sum(delivering[fc][jt][t][fc_prime][lot_unit] * lot_unit for lot_unit in lot_units) == delivered[fc_prime][jt][fc][t + deliver_time])
 
     plus, minus = {}, {}
     for fc in fc_wip_t.keys():
         print(fc)
         plus[fc] = {}
         minus[fc] = {}
+
         for wip in fc_wip_t[fc].keys():
             plus[fc][wip] = {}
             minus[fc][wip] = {}
+
             for t in range(1, horizon):
                 plus[fc][wip][t] = md.new_int_var(0, horizon // 10, f"{fc}_{wip}_{t}_plus")
                 minus[fc][wip][t] = md.new_int_var(0, horizon // 10, f"{fc}_{wip}_{t}_minus")
 
-                md.add(plus[fc][wip][t] == (produced[fc][wip][t] if wip in produced[fc] else 0) + delivered[fc][wip][t])
-                md.add(minus[fc][wip][t] == sum(consumed[fc][producing_jt][wip][t] for producing_jt in consumed[fc] if wip in consumed[fc][producing_jt]) + delivering[fc][wip][t])
+                md.add(plus[fc][wip][t] == (produced[fc][wip][t] if wip in produced[fc] else 0) + (sum(delivered[fc][wip][fc_prime][t] for fc_prime in delivered[fc][wip]) if wip in delivered[fc] else 0))
+                md.add(minus[fc][wip][t] == sum(consumed[fc][jt_prime][wip][t] for jt_prime in consumed[fc] if wip in consumed[fc][jt_prime]) + (sum(delivering[fc][wip][t][fc_prime][lot_unit] * lot_unit for fc_prime in delivering[fc][wip][t].keys() for lot_unit in delivering[fc][wip][t][fc_prime].keys()) if wip in delivering[fc] and t in delivering[fc][wip] else 0))
                 md.add(fc_wip_t[fc][wip][t] == fc_wip_t[fc][wip][t - 1] + plus[fc][wip][t] - minus[fc][wip][t])
     print("Hello?")
     every_final_product_max_set = {}
@@ -157,9 +171,9 @@ def main():
 
     params = {"tps": 8, "final_product": "JT12", "amount": 1, "horizon": 1000}
 
-    boms = {"JT12": {"JT9": 2, "JT10": 2, "JT11": 1},
+    boms = {"JT12": {"JT8": 2, "JT10": 2, "JT11": 1},
             "JT11": {"JT5": 2, "JT7": 4, "JT9": 2},
-            "JT10": {"JT4": 6, "JT6": 4, "JT9": 2},
+            "JT10": {"JT4": 6, "JT8": 4, "JT9": 2},
             "JT9": {"JT4": 3, "JT5": 2, "JT6": 1},
             "JT8": {"JT5": 1, "JT6": 1, "JT7": 1},
             "JT7": {"JT1": 8, "JT2": 10, "JT3": 18},
