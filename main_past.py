@@ -132,7 +132,7 @@ def lot_stream(process, deliver, boms, ini_set, params):
         if params["final_product"] in ini_set[fc]:
             every_final_product_max_set[fc] = md.new_int_var(0, params["amount"], f"{fc}_FP")
             md.add_max_equality(every_final_product_max_set[fc], fc_wip_t[fc][params["final_product"]].values())
-    print("BottleNeck1")
+
     md.add(sum(every_final_product_max_set.values()) >= params["amount"])
     total_makespan = md.new_int_var(0, horizon, "total_makespan")
     md.add_max_equality(total_makespan, [sem[fc][jt][k][1] for fc in sem.keys() for jt in sem[fc].keys() for k in range(job_interval_horizon)])
@@ -141,12 +141,8 @@ def lot_stream(process, deliver, boms, ini_set, params):
     status = solver.Solve(md)
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        print("O")
-        for fc in fc_wip_t.keys():
-            print(fc)
-            for wip in fc_wip_t[fc].keys():
-                print(wip)
-                print([fc_wip_t[fc][wip][t] for t in range(horizon)])
+        total_makespan = round(solver.ObjectiveValue())
+        print("Total Makespan :", total_makespan, "\n")
     else:
         print("X")
     return
