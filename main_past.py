@@ -7,7 +7,7 @@ def lot_stream(process, deliver, boms, ini_set, params):
 
     md = cp_model.CpModel()
 
-    fc_wip_t = {}
+    fc_wip_t, ingredients = {}, {}
     for fc in ini_set.keys():
         fc_wip_t[fc] = {}
         for jt in ini_set[fc].keys():
@@ -15,11 +15,14 @@ def lot_stream(process, deliver, boms, ini_set, params):
             if jt in boms:
                 for ingredient in boms[jt]:
                     if ingredient not in fc_wip_t[fc]: fc_wip_t[fc][ingredient] = {}
+                    if fc not in ingredients: ingredients[fc] = set()
+                    ingredients[fc].add(ingredient)
+
         for wip in fc_wip_t[fc].keys():
             fc_wip_t[fc][wip][0] = 0
             for t in range(1, horizon):
                 fc_wip_t[fc][wip][t] = md.new_int_var(0, horizon, f"{fc}_{wip}_{t}")
-
+    print(ingredients)
     delivered = {}
     for fc in ini_set.keys():
         print(fc)
@@ -35,13 +38,14 @@ def lot_stream(process, deliver, boms, ini_set, params):
 
     sem, intervals = {}, {} # Start End Make => Interval
     produced, consumed = {}, {}
+    se_event = {}
     for fc in ini_set.keys():
         print(fc)
         sem[fc] = {}
         intervals[fc] = {}
         produced[fc] = {}
         consumed[fc] = {}
-
+        se_event[fc] = {}
         for jt in ini_set[fc].keys():
             print(jt)
             sem[fc][jt] = {}
@@ -50,10 +54,10 @@ def lot_stream(process, deliver, boms, ini_set, params):
             if jt in boms:
                 consumed[fc][jt] = {ingredient: {t: md.new_int_var(0, boms[jt][ingredient], f"{fc}_{ingredient}_{t}_consumed") for t in range(1, horizon)} for ingredient in boms[jt].keys()}
 
-            se_event = {}
+            se_event[fc][jt] = {}
             for k in range(job_interval_horizon):
-                se_event[k] = {}
-                sem[fc][jt][k] = [md.new_int_var(1, horizon, f"{fc}_{jt}_{k}_st"), md.new_int_var(1, horizon, f"{fc}_{jt}_{k}_ed"), md.new_bool_var(f"{fc}_{jt}_{k}_mk")]
+                se_event[fc][jt][k] = {}
+                sem[fc][jt][k] = [md.new_int_var(1, horizon - 1, f"{fc}_{jt}_{k}_st"), md.new_int_var(1, horizon - 1, f"{fc}_{jt}_{k}_ed"), md.new_bool_var(f"{fc}_{jt}_{k}_mk")]
                 intervals[fc][jt][k] = md.new_optional_interval_var(sem[fc][jt][k][0], getattr(process, f"{fc}{jt}"), sem[fc][jt][k][1], sem[fc][jt][k][2], f"{fc}_{jt}_{k}_make")
 
                 if k:
@@ -61,30 +65,31 @@ def lot_stream(process, deliver, boms, ini_set, params):
                     md.add(sem[fc][jt][k - 1][1] <= sem[fc][jt][k][0])
 
                 for t in range(1, horizon):
-                    se_event[k][t] = [md.new_bool_var(f"{fc}{jt}{k}_{when}_{t}") for when in ("start", "end","real_start","real_end")]
-                    md.add(sem[fc][jt][k][0] == t).only_enforce_if(se_event[k][t][0])
-                    md.add(sem[fc][jt][k][0] != t).only_enforce_if(se_event[k][t][0].Not())
+                    se_event[fc][jt][k][t] = [md.new_bool_var(f"{fc}{jt}{k}_{when}_{t}") for when in ("start", "end","real_start","real_end")]
+                    md.add(sem[fc][jt][k][0] == t).only_enforce_if(se_event[fc][jt][k][t][0])
+                    md.add(sem[fc][jt][k][0] != t).only_enforce_if(se_event[fc][jt][k][t][0].Not())
 
-                    md.add(sem[fc][jt][k][1] == t).only_enforce_if(se_event[k][t][1])
-                    md.add(sem[fc][jt][k][1] != t).only_enforce_if(se_event[k][t][1].Not())
+                    md.add(sem[fc][jt][k][1] == t).only_enforce_if(se_event[fc][jt][k][t][1])
+                    md.add(sem[fc][jt][k][1] != t).only_enforce_if(se_event[fc][jt][k][t][1].Not())
 
-                    md.add_min_equality(se_event[k][t][2], [se_event[k][t][0], sem[fc][jt][k][2]])
-                    md.add_min_equality(se_event[k][t][3], [se_event[k][t][1], sem[fc][jt][k][2]])
-
-                if jt in boms:
-                    for ingredient in boms[jt]:
-                        for t in range(1, horizon):
-                            md.add(fc_wip_t[fc][ingredient][t - 1] + sum(delivered[fc][ingredient][fc_prime][t] for fc_prime in ini_set.keys() if ingredient in ini_set[fc_prime]) >= boms[jt][ingredient]).only_enforce_if(se_event[k][t][2])
+                    md.add_min_equality(se_event[fc][jt][k][t][2], [se_event[fc][jt][k][t][0], sem[fc][jt][k][2]])
+                    md.add_min_equality(se_event[fc][jt][k][t][3], [se_event[fc][jt][k][t][1], sem[fc][jt][k][2]])
 
             md.add_no_overlap(intervals[fc][jt].values())
 
             if jt in boms:
                 for ingredient in boms[jt].keys():
                     for t in range(1, horizon):
-                        md.add(consumed[fc][jt][ingredient][t] == boms[jt][ingredient] * sum(se_event[k][t][2] for k in range(job_interval_horizon)))
+                        md.add(consumed[fc][jt][ingredient][t] == boms[jt][ingredient] * sum(se_event[fc][jt][k][t][2] for k in range(job_interval_horizon)))
 
             for t in range(1, horizon):
-                md.add(produced[fc][jt][t] == 1 * sum(se_event[k][t][3] for k in range(job_interval_horizon)))
+                md.add(produced[fc][jt][t] == 1 * sum(se_event[fc][jt][k][t][3] for k in range(job_interval_horizon)))
+
+        if fc in ingredients:
+            for ingredient in ingredients[fc]:
+                use_this_ingredient_jt = [jt for jt in ini_set[fc].keys() if jt in boms and ingredient in boms[jt]]
+                for t in range(1, horizon):
+                    md.add(fc_wip_t[fc][ingredient][t - 1] + sum(delivered[fc][ingredient][fc_prime][t] for fc_prime in ini_set.keys() if ingredient in ini_set[fc_prime]) >= sum(boms[jt][ingredient] * sum(se_event[fc][jt][k][t][2] for k in range(job_interval_horizon)) for jt in use_this_ingredient_jt))
 
     print("Delivering")
     delivering = {}
@@ -101,11 +106,17 @@ def lot_stream(process, deliver, boms, ini_set, params):
                     delivering[fc][jt][t][fc_prime] = {}
                     for lot_unit in lot_units:
                         delivering[fc][jt][t][fc_prime][lot_unit] = md.new_int_var(0, horizon // 10, f"{fc}_{jt}_{t}_deliver_to_{fc_prime}_{lot_unit}")
+                md.add(fc_wip_t[fc][jt][t - 1] + produced[fc][jt][t] - sum(consumed[fc][jt_prime][jt][t] for jt_prime in ini_set[fc].keys() if jt_prime in boms and jt in boms[jt_prime])>= sum(delivering[fc][jt][t][fc_prime][lot_unit] * lot_unit for fc_prime in use_ingredient_fc for lot_unit in lot_units))
 
             for fc_prime in use_ingredient_fc:
                 deliver_time = getattr(deliver, f"{fc}{fc_prime}")
-                for t in range(1, horizon - deliver_time):
-                    md.add(sum(delivering[fc][jt][t][fc_prime][lot_unit] * lot_unit for lot_unit in lot_units) == delivered[fc_prime][jt][fc][t + deliver_time])
+                for t in range(1, horizon):
+                    if t + deliver_time < horizon:
+                        md.add(sum(delivering[fc][jt][t][fc_prime][lot_unit] * lot_unit for lot_unit in lot_units) == delivered[fc_prime][jt][fc][t + deliver_time])
+                    else:
+                        md.add(sum(delivering[fc][jt][t][fc_prime][lot_unit] * lot_unit for lot_unit in lot_units) == 0)
+                for t in range(1, min(horizon, deliver_time + 1)):
+                    md.add(delivered[fc_prime][jt][fc][t] == 0)
 
     plus, minus = {}, {}
     for fc in fc_wip_t.keys():
@@ -193,7 +204,7 @@ def main():
 
     fcs = list(factories)
     random.seed(4233)
-    deliveries = {fc1: {fc2 : random.randint(1, 5) if fc1 != fc2 else 0 for fc2 in fcs } for fc1 in fcs}
+    deliveries = {fc1: {fc2 : random.randint(3, 8) if fc1 != fc2 else 1 for fc2 in fcs} for fc1 in fcs}
     start(boms, factories, deliveries, params)
 
 if __name__ == "__main__":
