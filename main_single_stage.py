@@ -111,7 +111,7 @@ def lot_stream(process, deliver, boms, ini_set, params):
     truck_move = {arc: {t: md.new_int_var(0, tps, f"truck_{arc[0]}_to_{arc[1]}_{t}") for t in range(1, horizon)} for arc in arcs} # t에 f -> g 출발하는 트럭 수 (빈 차 이동 포함)
     truck_idle = {f: {t: md.new_int_var(0, tps, f"truck_idle_{f}_{t}") for t in range(horizon)} for f in fcs} # t 시점 f에 대기 중인 트럭 수
     truck_used = md.new_int_var(0, tps, "truck_used")
-    md.add(sum(truck_idle[f][0] for f in fcs) == truck_used) # 초기 배치된 트럭 수 = 투입 트럭 수
+    md.add(sum(truck_idle[f][0] for f in fcs) == truck_used)
 
     for f, g in arcs:
         for t in range(1, horizon):
@@ -128,7 +128,7 @@ def lot_stream(process, deliver, boms, ini_set, params):
             if fc == fc_prime: continue
             for t in range(1, horizon):
                 load = sum(delivering[fc][jt][t][fc_prime][lot_unit] * lot_unit for jt in fc_deliver_to[fc][fc_prime] for lot_unit in ini_set[fc][jt])
-                md.add(load <= horizon * truck_move[(fc, fc_prime)][t]) # 적재 무제한 => 싣는 게 있으면 트럭 1대 이상 출발
+                md.add(load <= horizon * truck_move[(fc, fc_prime)][t])
 
     truck_travel = md.new_int_var(0, tps * horizon, "truck_travel")
     md.add(truck_travel == sum(truck_move[(f, g)][t] * getattr(deliver, f"{f}{g}") for f, g in arcs for t in range(1, horizon)))
@@ -235,70 +235,65 @@ def lot_stream(process, deliver, boms, ini_set, params):
             print(f"tr{i + 1} (start {truck['home']})")
             for f, g, t, arrive, cargo in truck["moves"]:
                 print(f"    {f} -> {g} | {t} ~ {arrive} ({arrive - t}) | {cargo if cargo else 'empty'}")
-        draw_gantt(ini_set, jobs, trucks, total_makespan, tps)
+
+        palette = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+        INK, MUTED, GRID, GO, RETURN = "#1f2328", "#6b7280", "#e5e7eb", "#4b5563", "#d1d5db"
+
+        jt_order = list(dict.fromkeys(jt for fc in ini_set for jt in ini_set[fc]))
+        jt_color = {jt: palette[i % len(palette)] for i, jt in enumerate(jt_order)}
+        text_on = lambda hex_color: INK if sum(int(hex_color[i:i + 2], 16) * w for i, w in ((1, 0.299), (3, 0.587), (5, 0.114))) > 140 else "white" # 막대 밝기에 따라 글자색
+        n_truck = len(trucks)
+
+        y_of = {f"tr{i + 1} ({truck['home']})": i for i, truck in enumerate(trucks)}
+        truck_rows = list(y_of.keys())
+        fc_first_row = {}
+        for fc in ini_set:
+            fc_first_row[fc] = len(y_of) + 1
+            for jt in ini_set[fc]:
+                y_of[f"{fc} · {jt}"] = len(y_of) + 1
+        x_max = max([total_makespan] + [move[3] for truck in trucks for move in truck["moves"]]) + 1
+
+        _, ax = plt.subplots(figsize=(max(14, x_max * 0.4), 0.6 * (len(y_of) + 1) + 1.5))
+        h = 0.75
+
+        for fc, jt, k, st, ed in jobs:
+            y = y_of[f"{fc} · {jt}"]
+            ax.barh(y, ed - st, left=st, height=h, color=jt_color[jt], edgecolor="white", linewidth=1.5)
+            ax.text((st + ed) / 2, y, f"{k}_th\n({ed - st})", ha="center", va="center", fontsize=5, color=text_on(jt_color[jt]))
+
+        for row, truck in zip(truck_rows, trucks):
+            y = y_of[row]
+            for fc_from, fc_to, depart, arrive, cargo in truck["moves"]:
+                ax.barh(y, arrive - depart, left=depart, height=h, color=GO if cargo else RETURN, edgecolor="white", linewidth=1.5)
+                label = f"{fc_from}→{fc_to} ({arrive - depart})"
+                label += "\n" + " ".join(f"{jt}×{n}" for jt, n in cargo.items()) if cargo else "\nempty"
+                ax.text((depart + arrive) / 2, y, label, ha="center", va="center", fontsize=6, color="white" if cargo else INK)
+
+        ax.axvline(total_makespan, color=INK, linestyle="--", linewidth=1)
+        ax.text(total_makespan, -0.9, f"makespan = {total_makespan} ", ha="right", va="center", fontsize=8, color=INK)
+        for fc in list(fc_first_row)[1:]:
+            ax.axhline(fc_first_row[fc] - 0.5, color=GRID, linewidth=0.8)
+        ax.axhline(n_truck, color=MUTED, linewidth=1)
+
+        ax.set_yticks(list(y_of.values()), list(y_of.keys()))
+        ax.set_ylim(len(y_of) + 0.5, -1.4)
+        ax.set_xlim(0, x_max)
+        ax.set_xlabel("Time", color=MUTED)
+        ax.set_title(f"Production & Delivery Gantt  (trucks used {n_truck} / tps {tps})", loc="left", color=INK)
+        ax.grid(axis="x", color=GRID, linewidth=0.8)
+        ax.set_axisbelow(True)
+        for side in ("top", "right", "left"):
+            ax.spines[side].set_visible(False)
+        ax.tick_params(colors=MUTED, length=0)
+
+        handles = [Patch(color=jt_color[jt], label=jt) for jt in jt_order]
+        handles += [Patch(color=GO, label="truck: loaded"), Patch(color=RETURN, label="truck: empty move")]
+        ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.01, 1), frameon=False, fontsize=8)
+        plt.tight_layout()
+        plt.show()
     else:
         print("X")
     return
-
-def draw_gantt(ini_set, jobs, trucks, total_makespan, tps):
-    # jobs   : (fc, jt, k, st, ed)
-    # trucks : [{"home", "moves": [(from, to, depart, arrive, cargo)]}]  cargo가 비어있으면 빈 차 이동
-    palette = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
-    INK, MUTED, GRID, GO, RETURN = "#1f2328", "#6b7280", "#e5e7eb", "#4b5563", "#d1d5db"
-
-    jt_order = list(dict.fromkeys(jt for fc in ini_set for jt in ini_set[fc]))
-    jt_color = {jt: palette[i % len(palette)] for i, jt in enumerate(jt_order)}
-    text_on = lambda hex_color: INK if sum(int(hex_color[i:i + 2], 16) * w for i, w in ((1, 0.299), (3, 0.587), (5, 0.114))) > 140 else "white" # 막대 밝기에 따라 글자색
-    n_truck = len(trucks)
-
-    # 공장 내 Job_type끼리는 병렬 생산이 가능하므로 (fc, jt)별로 행을 나눔
-    y_of = {f"tr{i + 1} ({truck['home']})": i for i, truck in enumerate(trucks)}
-    truck_rows = list(y_of.keys())
-    fc_first_row = {}
-    for fc in ini_set:
-        fc_first_row[fc] = len(y_of) + 1
-        for jt in ini_set[fc]:
-            y_of[f"{fc} · {jt}"] = len(y_of) + 1 # 트럭/공장 사이 한 칸 띄움
-    x_max = max([total_makespan] + [move[3] for truck in trucks for move in truck["moves"]]) + 1
-
-    _, ax = plt.subplots(figsize=(max(14, x_max * 0.4), 0.6 * (len(y_of) + 1) + 1.5))
-    h = 0.75
-
-    for fc, jt, k, st, ed in jobs:
-        y = y_of[f"{fc} · {jt}"]
-        ax.barh(y, ed - st, left=st, height=h, color=jt_color[jt], edgecolor="white", linewidth=1.5)
-        ax.text((st + ed) / 2, y, f"{k}_th\n({ed - st})", ha="center", va="center", fontsize=5, color=text_on(jt_color[jt]))
-
-    for row, truck in zip(truck_rows, trucks):
-        y = y_of[row]
-        for fc_from, fc_to, depart, arrive, cargo in truck["moves"]:
-            ax.barh(y, arrive - depart, left=depart, height=h, color=GO if cargo else RETURN, edgecolor="white", linewidth=1.5)
-            label = f"{fc_from}→{fc_to} ({arrive - depart})"
-            label += "\n" + " ".join(f"{jt}×{n}" for jt, n in cargo.items()) if cargo else "\nempty"
-            ax.text((depart + arrive) / 2, y, label, ha="center", va="center", fontsize=6, color="white" if cargo else INK)
-
-    ax.axvline(total_makespan, color=INK, linestyle="--", linewidth=1)
-    ax.text(total_makespan, -0.9, f"makespan = {total_makespan} ", ha="right", va="center", fontsize=8, color=INK)
-    for fc in list(fc_first_row)[1:]:
-        ax.axhline(fc_first_row[fc] - 0.5, color=GRID, linewidth=0.8)
-    ax.axhline(n_truck, color=MUTED, linewidth=1)
-
-    ax.set_yticks(list(y_of.values()), list(y_of.keys()))
-    ax.set_ylim(len(y_of) + 0.5, -1.4)
-    ax.set_xlim(0, x_max)
-    ax.set_xlabel("Time", color=MUTED)
-    ax.set_title(f"Production & Delivery Gantt  (trucks used {n_truck} / tps {tps})", loc="left", color=INK)
-    ax.grid(axis="x", color=GRID, linewidth=0.8)
-    ax.set_axisbelow(True)
-    for side in ("top", "right", "left"):
-        ax.spines[side].set_visible(False)
-    ax.tick_params(colors=MUTED, length=0)
-
-    handles = [Patch(color=jt_color[jt], label=jt) for jt in jt_order]
-    handles += [Patch(color=GO, label="truck: loaded"), Patch(color=RETURN, label="truck: empty move")]
-    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.01, 1), frameon=False, fontsize=8)
-    plt.tight_layout()
-    plt.show()
 
 class Process:
     def __init__(self): pass
@@ -319,61 +314,36 @@ def start(boms, factories, deliveries, params):
 
 def main():
 
-    params = {
-        "tps": 8,
-        "final_product": "JT12",
-        "amount": 2,
-        "horizon": 50,
-        # 제품별 재고 유지비용 (/ 개 / 시간) : BOM level이 높을수록 비싸게 설정, 미기재 제품은 0
-        "holding_cost": {
-            "JT1": 1, "JT2": 1,     # 원재료
-            "JT4": 3, "JT5": 3,     # 1차 가공
-            "JT9": 6,               # 2차 가공
-            "JT12": 10,             # 최종 제품
-        },
-    }
+    params = {"tps": 8, "final_product": "JT12", "amount": 2, "horizon": 50, "holding_cost": {"JT1": 1, "JT2": 1, "JT4": 3, "JT5": 3, "JT9": 6, "JT12": 10}}
 
     boms = {
         "JT4": {
             "JT1": 2,
-            "JT2": 1,
-        },
+            "JT2": 1},
         "JT5": {
-            "JT1": 1,
-        },
+            "JT1": 1},
         "JT9": {
             "JT4": 1,
-            "JT5": 1,
-        },
+            "JT5": 1},
         "JT12": {
             "JT9": 1,
-            "JT5": 1,
-        },
-    }
+            "JT5": 1}}
 
     factories = {
-        # 원재료 생산
         "Fc1": {
             "JT1": {"lots": [5, 10], "time": 1},
-            "JT2": {"lots": [5, 10], "time": 1},
-        },
+            "JT2": {"lots": [5, 10], "time": 1}},
 
-        # 1차 가공
         "Fc2": {
             "JT4": {"lots": [2], "time": 2},
-            "JT5": {"lots": [2], "time": 2},
-        },
+            "JT5": {"lots": [2], "time": 2}},
 
-        # 2차 가공
         "Fc3": {
-            "JT9": {"lots": [1], "time": 3},
-        },
+            "JT9": {"lots": [1], "time": 3}},
 
-        # 최종 제품
         "Fc4": {
-            "JT12": {"lots": [1], "time": 4},
-        },
-    }
+            "JT12": {"lots": [1], "time": 4}}}
+
     fcs = list(factories)
     random.seed(4233)
     deliveries = {fc1: {fc2 : random.randint(3, 8) if fc1 != fc2 else 1 for fc2 in fcs} for fc1 in fcs}
