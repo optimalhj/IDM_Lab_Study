@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from ortools.sat.python import cp_model
 
-def lot_stream(process, deliver, boms, ini_set, params):
+def lot_stream(process, deliver, boms, holding_cost, ini_set, params):
     horizon = params["horizon"]
     job_interval_horizon = {fc: {jt: horizon // getattr(process, f"{fc}{jt}") + 1 for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
 
@@ -133,22 +133,10 @@ def lot_stream(process, deliver, boms, ini_set, params):
     truck_travel = md.new_int_var(0, tps * horizon, "truck_travel")
     md.add(truck_travel == sum(truck_move[(f, g)][t] * getattr(deliver, f"{f}{g}") for f, g in arcs for t in range(1, horizon)))
 
-    plus, minus = {}, {}
     for fc in fc_wip_t.keys():
-        plus[fc] = {}
-        minus[fc] = {}
-
         for wip in fc_wip_t[fc].keys():
-            plus[fc][wip] = {}
-            minus[fc][wip] = {}
-
             for t in range(1, horizon):
-                plus[fc][wip][t] = md.new_int_var(0, horizon, f"{fc}_{wip}_{t}_plus")
-                minus[fc][wip][t] = md.new_int_var(0, horizon, f"{fc}_{wip}_{t}_minus")
-
-                md.add(plus[fc][wip][t] == (produced[fc][wip][t] if wip in produced[fc] else 0) + (sum(delivered[fc][fc_prime][wip][t] for fc_prime in delivered[fc] if wip in delivered[fc][fc_prime]) if fc in delivered else 0))
-                md.add(minus[fc][wip][t] == sum(consumed[fc][jt_prime][wip][t] for jt_prime in consumed[fc] if wip in consumed[fc][jt_prime]) + (sum(delivering[fc][wip][t][fc_prime][lot_unit] * lot_unit for lot_unit in ini_set[fc][wip] for fc_prime in fc_deliver_to[fc].keys() if wip in fc_deliver_to[fc][fc_prime]) if fc in delivering and wip in delivering[fc] else 0))
-                md.add(fc_wip_t[fc][wip][t] == fc_wip_t[fc][wip][t - 1] + plus[fc][wip][t] - minus[fc][wip][t])
+                md.add(fc_wip_t[fc][wip][t] == fc_wip_t[fc][wip][t - 1] + (produced[fc][wip][t] if wip in produced[fc] else 0) + (sum(delivered[fc][fc_prime][wip][t] for fc_prime in delivered[fc] if wip in delivered[fc][fc_prime]) if fc in delivered else 0) - sum(consumed[fc][jt_prime][wip][t] for jt_prime in consumed[fc] if wip in consumed[fc][jt_prime]) - (sum(delivering[fc][wip][t][fc_prime][lot_unit] * lot_unit for lot_unit in ini_set[fc][wip] for fc_prime in fc_deliver_to[fc].keys() if wip in fc_deliver_to[fc][fc_prime]) if fc in delivering and wip in delivering[fc] else 0))
 
     every_final_product_max_set = {}
     for fc in ini_set.keys():
@@ -165,7 +153,6 @@ def lot_stream(process, deliver, boms, ini_set, params):
     total_makespan = md.new_int_var(0, horizon, "total_makespan")
     md.add_max_equality(total_makespan, [sem[fc][jt][k][1] for fc in sem.keys() for jt in sem[fc].keys() for k in range(job_interval_horizon[fc][jt])])
 
-    hold_cost = params["holding_cost"]
     before_makespan = {t: md.new_bool_var(f"{t}_before_makespan") for t in range(1, horizon)}
     for t in range(1, horizon):
         md.add(total_makespan >= t + 1).only_enforce_if(before_makespan[t])
@@ -177,8 +164,8 @@ def lot_stream(process, deliver, boms, ini_set, params):
             held[fc][wip] = {t: md.new_int_var(0, horizon, f"{fc}_{wip}_{t}_held") for t in range(1, horizon)}
             for t in range(1, horizon):
                 md.add(held[fc][wip][t] >= fc_wip_t[fc][wip][t] - horizon * (1 - before_makespan[t]))
-            holding[fc][wip] = hold_cost.get(wip, 0) * sum(held[fc][wip].values())
-    hold_ub = sum(hold_cost.get(wip, 0) * horizon * (horizon - 1) for fc in fc_wip_t for wip in fc_wip_t[fc])
+            holding[fc][wip] = holding_cost.get(wip, 0) * sum(held[fc][wip].values())
+    hold_ub = sum(holding_cost.get(wip, 0) * horizon * (horizon - 1) for fc in fc_wip_t for wip in fc_wip_t[fc])
 
     for fc in fc_deliver_to.keys():
         for fc_prime in fc_deliver_to[fc].keys():
@@ -189,8 +176,8 @@ def lot_stream(process, deliver, boms, ini_set, params):
                 for t in range(1, horizon):
                     in_transit = sum(delivering[fc][jt][s][fc_prime][lot_unit] * lot_unit for s in range(max(1, t - deliver_time + 1), t + 1) for lot_unit in ini_set[fc][jt])
                     md.add(held[route][jt][t] >= in_transit - horizon * deliver_time * (1 - before_makespan[t]))
-                holding[route][jt] = hold_cost.get(jt, 0) * sum(held[route][jt].values())
-                hold_ub += hold_cost.get(jt, 0) * horizon * deliver_time * (horizon - 1)
+                holding[route][jt] = holding_cost.get(jt, 0) * sum(held[route][jt].values())
+                hold_ub += holding_cost.get(jt, 0) * horizon * deliver_time * (horizon - 1)
     total_holding = md.new_int_var(0, hold_ub, "total_holding_cost")
     md.add(total_holding == sum(holding[fc][wip] for fc in holding for wip in holding[fc]))
 
@@ -212,7 +199,7 @@ def lot_stream(process, deliver, boms, ini_set, params):
         for fc in holding.keys():
             for wip in holding[fc].keys():
                 if cost := solver.value(holding[fc][wip]):
-                    print(f"    {fc} {wip} : {cost} (= {hold_cost.get(wip, 0)} x {sum(solver.value(v) for v in held[fc][wip].values())} unit*time)")
+                    print(f"    {fc} {wip} : {cost} (= {holding_cost.get(wip, 0)} x {sum(solver.value(v) for v in held[fc][wip].values())} unit*time)")
         print("Total Job :", solver.value(total_job))
         print("Truck Used :", solver.value(truck_used), "/", tps)
         print("Truck Travel :", solver.value(truck_travel), "\n")
@@ -299,7 +286,7 @@ class Process:
     def __init__(self): pass
 class Deliver:
     def __init__(self): pass
-def start(boms, factories, deliveries, params):
+def start(boms, factories, holding_cost, deliveries, params):
     process, deliver, ini_set = Process(), Deliver(), {}
     for fc in factories.keys():
         ini_set[fc] = {}
@@ -309,12 +296,12 @@ def start(boms, factories, deliveries, params):
     for fc1 in deliveries.keys():
         for fc2 in deliveries[fc1].keys():
             setattr(deliver, f"{fc1}{fc2}", deliveries[fc1][fc2])
-    lot_stream(process, deliver, boms, ini_set, params)
+    lot_stream(process, deliver, boms, holding_cost, ini_set, params)
 
 
 def main():
 
-    params = {"tps": 8, "final_product": "JT12", "amount": 2, "horizon": 50, "holding_cost": {"JT1": 1, "JT2": 1, "JT4": 3, "JT5": 3, "JT9": 6, "JT12": 10}}
+    params = {"tps": 8, "final_product": "JT12", "amount": 2, "horizon": 50}
 
     boms = {
         "JT4": {
@@ -344,10 +331,12 @@ def main():
         "Fc4": {
             "JT12": {"lots": [1], "time": 4}}}
 
+    holding_cost = {"JT1": 1, "JT2": 1, "JT4": 3, "JT5": 3, "JT9": 6, "JT12": 10}
+
     fcs = list(factories)
     random.seed(4233)
     deliveries = {fc1: {fc2 : random.randint(3, 8) if fc1 != fc2 else 1 for fc2 in fcs} for fc1 in fcs}
-    start(boms, factories, deliveries, params)
+    start(boms, factories, holding_cost, deliveries, params)
 
 if __name__ == "__main__":
     main()
