@@ -112,11 +112,13 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params):
                 md.add(fc_wip_t[fc][wip][t] == fc_wip_t[fc][wip][t - 1] + plus - minus)
 
     every_final_product_max_set = {}
-    for fc in ini_set.keys():
-        if params["final_product"] in ini_set[fc]:
-            every_final_product_max_set[fc] = md.new_int_var(0, params["amount"], f"{fc}_FP")
-            md.add_max_equality(every_final_product_max_set[fc], fc_wip_t[fc][params["final_product"]].values())
-    md.add(sum(every_final_product_max_set.values()) >= params["amount"])
+    for final_product, amount in zip(params["final_product"], params["amount"]):
+        for fc in fc_wip_t.keys():
+            if final_product in fc_wip_t[fc]:
+                if fc not in every_final_product_max_set: every_final_product_max_set[fc] = {}
+                every_final_product_max_set[fc][final_product] = md.new_int_var(0, 2 * amount, f"{fc}_{final_product}")
+                md.add_max_equality(every_final_product_max_set[fc][final_product], fc_wip_t[fc][final_product].values())
+        md.add(sum(every_final_product_max_set[fc][final_product] for fc in fc_wip_t.keys()) >= amount)
 
     every_fc_num_job = {}
     for fc in ini_set.keys():
@@ -275,7 +277,7 @@ def start(boms, factories, holding_cost, deliveries, params):
 
 def main():
 
-    params = {"tps": 8, "final_product": "JT12", "amount": 1, "horizon": 80}
+    params = {"tps": 8, "final_product": ["JT12", "JT9"], "amount": [1, 1], "horizon": 80}
 
     boms = {
         "JT4": {
