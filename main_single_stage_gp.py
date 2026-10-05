@@ -1,9 +1,10 @@
 import random
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
-from ortools.sat.python import cp_model
+import gurobipy as gp
+from gurobipy import GRB
 
-def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
+def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
     need = {}
     def explode(jt, qty):
         need[jt] = need.get(jt, 0) + qty
@@ -11,125 +12,123 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
     for final_product, amount in zip(params["final_product"], params["amount"]): explode(final_product, amount)
     max_job = {fc: {jt: -(-need.get(jt, 0) // min(ini_set[fc][jt])) * min(ini_set[fc][jt]) for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
 
-    md = cp_model.CpModel()
+    env = gp.Env(empty=True)
+    env.setParam('OutputFlag', 0)
+    env.start()
+    md = gp.Model(env=env)
 
-    fc_wip_t, delivering = {}, {} # delivering[보내는 fc][받는 fc][jt][t][lot_unit] : t에 출발하는 lot 수
+    fc_wip_t, delivering = {}, {}
     for fc in ini_set.keys():
         fc_wip_t[fc] = {}
         for jt in ini_set[fc].keys():
-            fc_wip_t[fc][jt] = {t: md.new_int_var(0, horizon, f"{fc}_{jt}_{t}") if t else 0 for t in range(horizon)}
+            fc_wip_t[fc][jt] = {t: md.addVar(vtype=GRB.INTEGER, lb=0, name=f"{fc}_{jt}_{t}") if t else 0 for t in range(horizon)}
             for fc_prime in set([fc_prime for fc_prime in ini_set.keys() if fc_prime != fc for jt_prime in ini_set[fc_prime] if jt_prime in boms and jt in boms[jt_prime]]): # 같은 공장 안에서 쓰는 재료는 배송 없이 fc_wip_t 에서 바로 소비
                 if fc not in delivering: delivering[fc] = {}
                 if fc_prime not in delivering[fc]: delivering[fc][fc_prime] = {}
-                delivering[fc][fc_prime][jt] = {t: {lot_unit: md.new_int_var(0, max_job[fc][jt] // lot_unit, f"{fc}_{jt}_{t}_deliver_to_{fc_prime}_{lot_unit}") for lot_unit in ini_set[fc][jt]} for t in range(1, horizon)}
+                delivering[fc][fc_prime][jt] = {t: {lot_unit: md.addVar(vtype=GRB.INTEGER, lb=0, ub=max_job[fc][jt] // lot_unit, name=f"{fc}_{jt}_{t}_deliver_to_{fc_prime}_{lot_unit}") for lot_unit in ini_set[fc][jt]} for t in range(1, horizon)}
     for fc in delivering.keys():
         for fc_prime in delivering[fc].keys():
             for ingredient in delivering[fc][fc_prime].keys():
                 if ingredient not in fc_wip_t[fc_prime]:
-                    fc_wip_t[fc_prime][ingredient] = {t: md.new_int_var(0, horizon, f"{fc_prime}_{ingredient}_{t}") if t else 0 for t in range(horizon)}
+                    fc_wip_t[fc_prime][ingredient] = {t: md.addVar(vtype=GRB.INTEGER, lb=0, name=f"{fc_prime}_{ingredient}_{t}") if t else 0 for t in range(horizon)}
 
-    sem, intervals = {}, {} # Start End Make => Interval
+    sem = {} # Start End Make => Interval
     produced, consumed = {}, {}
     se_event = {}
     for fc in ini_set.keys():
         sem[fc] = {}
-        intervals[fc] = {}
         produced[fc] = {}
         consumed[fc] = {}
         se_event[fc] = {}
         for jt in ini_set[fc].keys():
+            process_time = getattr(process, f"{fc}{jt}")
             sem[fc][jt] = {}
-            intervals[fc][jt] = {}
-            produced[fc][jt] = {t: md.new_bool_var(f"{fc}_{jt}_{t}_produced") for t in range(1, horizon)}
+            produced[fc][jt] = {t: md.addVar(vtype=GRB.BINARY, name=f"{fc}_{jt}_{t}_produced") for t in range(1, horizon)}
             if jt in boms:
-                consumed[fc][jt] = {ingredient: {t: md.new_int_var(0, boms[jt][ingredient], f"{fc}_{ingredient}_{t}_consumed") for t in range(1, horizon)} for ingredient in boms[jt].keys()}
+                consumed[fc][jt] = {ingredient: {t: md.addVar(vtype=GRB.INTEGER, lb=0, ub=boms[jt][ingredient], name=f"{fc}_{ingredient}_{t}_consumed") for t in range(1, horizon)} for ingredient in boms[jt].keys()}
 
             se_event[fc][jt] = {}
             for k in range(max_job[fc][jt]):
                 se_event[fc][jt][k] = {}
-                sem[fc][jt][k] = [md.new_int_var(1, horizon - 1, f"{fc}_{jt}_{k}_st"), md.new_int_var(1, horizon - 1, f"{fc}_{jt}_{k}_ed"), md.new_bool_var(f"{fc}_{jt}_{k}_mk")]
-                intervals[fc][jt][k] = md.new_optional_interval_var(sem[fc][jt][k][0], getattr(process, f"{fc}{jt}"), sem[fc][jt][k][1], sem[fc][jt][k][2], f"{fc}_{jt}_{k}_make")
-
+                sem[fc][jt][k] = [md.addVar(vtype=GRB.INTEGER, lb=1, ub=horizon - 1, name=f"{fc}_{jt}_{k}_st"), md.addVar(vtype=GRB.INTEGER, lb=1, ub=horizon - 1, name=f"{fc}_{jt}_{k}_ed"), md.addVar(vtype=GRB.BINARY, name=f"{fc}_{jt}_{k}_mk")]
+                md.addConstr(sem[fc][jt][k][0] + process_time * sem[fc][jt][k][2]== sem[fc][jt][k][1])
                 if k:
-                    md.add(sem[fc][jt][k - 1][2] >= sem[fc][jt][k][2])
-                    md.add(sem[fc][jt][k - 1][1] <= sem[fc][jt][k][0])
+                    md.addConstr(sem[fc][jt][k - 1][2] >= sem[fc][jt][k][2])
+                    md.addConstr(sem[fc][jt][k - 1][1] <= sem[fc][jt][k][0])
 
                 # t에 실제로 시작하면 1 : 활성(mk=1)이면 정확히 한 시점에서만 1, 비활성이면 전부 0
                 # 생산 시간이 고정이므로 종료 이벤트는 따로 두지 않고 se_event[t - 생산시간]으로 대체
                 for t in range(1, horizon):
-                    se_event[fc][jt][k][t] = md.new_bool_var(f"{fc}{jt}{k}_start_{t}")
-                    md.add(sem[fc][jt][k][0] == t).only_enforce_if(se_event[fc][jt][k][t])
-                md.add(sum(se_event[fc][jt][k].values()) == sem[fc][jt][k][2])
-
-            md.add_no_overlap(intervals[fc][jt].values())
+                    se_event[fc][jt][k][t] = md.addVar(vtype=GRB.BINARY, name=f"{fc}{jt}{k}_start_{t}")
+                    md.addGenConstrIndicator(se_event[fc][jt][k][t], True, sem[fc][jt][k][0] == t)
+                md.addConstr(gp.quicksum(se_event[fc][jt][k].values()) == sem[fc][jt][k][2])
 
             if jt in boms:
                 for ingredient in boms[jt].keys():
                     for t in range(1, horizon):
-                        md.add(consumed[fc][jt][ingredient][t] == boms[jt][ingredient] * sum(se_event[fc][jt][k][t] for k in range(max_job[fc][jt])))
+                        md.addConstr(consumed[fc][jt][ingredient][t] == boms[jt][ingredient] * gp.quicksum(se_event[fc][jt][k][t] for k in range(max_job[fc][jt])))
 
-            process_time = getattr(process, f"{fc}{jt}")
             for t in range(1, horizon):
-                md.add(produced[fc][jt][t] == sum(se_event[fc][jt][k][t - process_time] for k in range(max_job[fc][jt]) if t - process_time >= 1))
+                md.addConstr(produced[fc][jt][t] == gp.quicksum(se_event[fc][jt][k][t - process_time] for k in range(max_job[fc][jt]) if t - process_time >= 1))
 
     fcs, tps = list(ini_set), params["tps"]
     arcs = [(fc1, fc2) for fc1 in fcs for fc2 in fcs if fc1 != fc2]
-    truck_move = {arc: {t: md.new_int_var(0, tps, f"truck_{arc[0]}_to_{arc[1]}_{t}") for t in range(1, horizon)} for arc in arcs} # t에 f -> g 출발하는 트럭 수 (빈 차 이동 포함)
-    truck_idle = {fc: {t: md.new_int_var(0, tps, f"truck_idle_{fc}_{t}") for t in range(horizon)} for fc in fcs} # t 시점 f에 대기 중인 트럭 수
-    truck_used = md.new_int_var(0, tps, "truck_used")
-    md.add(sum(truck_idle[f][0] for f in fcs) == truck_used)
+    truck_move = {arc: {t: md.addVar(vtype=GRB.INTEGER, lb=0, ub=tps, name=f"truck_{arc[0]}_to_{arc[1]}_{t}") for t in range(1, horizon)} for arc in arcs} # t에 f -> g 출발하는 트럭 수 (빈 차 이동 포함)
+    truck_idle = {fc: {t: md.addVar(vtype=GRB.INTEGER, lb=0, ub=tps, name=f"truck_idle_{fc}_{t}") for t in range(horizon)} for fc in fcs} # t 시점 f에 대기 중인 트럭 수
+    truck_used = md.addVar(vtype=GRB.INTEGER, lb=0, ub=tps, name="truck_used")
+    md.addConstr(gp.quicksum(truck_idle[f][0] for f in fcs) == truck_used)
 
     for fc1, fc2 in arcs:
         for t in range(1, horizon):
             if t + getattr(deliver, f"{fc1}{fc2}") >= horizon:
-                md.add(truck_move[(fc1, fc2)][t] == 0)
+                md.addConstr(truck_move[(fc1, fc2)][t] == 0)
 
     for fc1 in fcs:
         for t in range(1, horizon):
-            arrive = sum(truck_move[(fc2, fc1)][t - getattr(deliver, f"{fc2}{fc1}")] for fc2 in fcs if fc2 != fc1 and t - getattr(deliver, f"{fc2}{fc1}") >= 1)
-            depart = sum(truck_move[(fc1, fc2)][t] for fc2 in fcs if fc2 != fc1)
-            md.add(truck_idle[fc1][t] == truck_idle[fc1][t - 1] + arrive - depart)
+            arrive = gp.quicksum(truck_move[(fc2, fc1)][t - getattr(deliver, f"{fc2}{fc1}")] for fc2 in fcs if fc2 != fc1 and t - getattr(deliver, f"{fc2}{fc1}") >= 1)
+            depart = gp.quicksum(truck_move[(fc1, fc2)][t] for fc2 in fcs if fc2 != fc1)
+            md.addConstr(truck_idle[fc1][t] == truck_idle[fc1][t - 1] + arrive - depart)
 
     for fc in delivering.keys():
         for fc_prime in delivering[fc].keys():
             for t in range(1, horizon):
                 load = sum(delivering[fc][fc_prime][jt][t][lot_unit] * lot_unit for jt in delivering[fc][fc_prime] for lot_unit in ini_set[fc][jt])
-                md.add(load <= sum(max_job[fc][jt] for jt in delivering[fc][fc_prime]) * truck_move[(fc, fc_prime)][t])
+                md.addConstr(load <= sum(max_job[fc][jt] for jt in delivering[fc][fc_prime]) * truck_move[(fc, fc_prime)][t])
 
-    truck_travel = md.new_int_var(0, tps * horizon, "truck_travel")
-    md.add(truck_travel == sum(truck_move[(fc1, fc2)][t] * getattr(deliver, f"{fc1}{fc2}") for fc1, fc2 in arcs for t in range(1, horizon)))
+    truck_travel = md.addVar(vtype=GRB.INTEGER, lb=0, ub=tps * horizon, name="truck_travel")
+    md.addConstr(truck_travel == sum(truck_move[(fc1, fc2)][t] * getattr(deliver, f"{fc1}{fc2}") for fc1, fc2 in arcs for t in range(1, horizon)))
 
     for fc in fc_wip_t.keys():
         for wip in fc_wip_t[fc].keys():
             for t in range(1, horizon):
                 plus = (produced[fc][wip][t] if wip in produced[fc] else 0) + sum(delivering[fc1][fc][wip][t - getattr(deliver, f"{fc1}{fc}")][lot_unit] * lot_unit for fc1 in delivering if wip in delivering[fc1].get(fc, {}) and t - getattr(deliver, f"{fc1}{fc}") >= 1 for lot_unit in ini_set[fc1][wip])
                 minus = sum(consumed[fc][jt_prime][wip][t] for jt_prime in consumed[fc] if wip in consumed[fc][jt_prime]) + sum(delivering[fc][fc_prime][wip][t][lot_unit] * lot_unit for fc_prime in delivering.get(fc, {}) if wip in delivering[fc][fc_prime] for lot_unit in ini_set[fc][wip])
-                md.add(fc_wip_t[fc][wip][t] == fc_wip_t[fc][wip][t - 1] + plus - minus)
+                md.addConstr(fc_wip_t[fc][wip][t] == fc_wip_t[fc][wip][t - 1] + plus - minus)
 
     every_final_product_max_set = {} # every_final_product_max_set[final_product][fc] : fc 에서의 최대 재고
     for final_product, amount in zip(params["final_product"], params["amount"]):
         every_final_product_max_set[final_product] = {}
         for fc in ini_set.keys():
             if final_product in ini_set[fc]:
-                every_final_product_max_set[final_product][fc] = md.new_int_var(0, horizon, f"{fc}_{final_product}_FP")
-                md.add_max_equality(every_final_product_max_set[final_product][fc], fc_wip_t[fc][final_product].values())
-        md.add(sum(every_final_product_max_set[final_product].values()) >= amount)
+                every_final_product_max_set[final_product][fc] = md.addVar(vtype=GRB.INTEGER, lb=0, ub=horizon, name=f"{fc}_{final_product}_FP")
+                md.addGenConstrMax(every_final_product_max_set[final_product][fc], fc_wip_t[fc][final_product].values())
+        md.addConstr(sum(every_final_product_max_set[final_product].values()) >= amount)
 
-    total_makespan = md.new_int_var(0, horizon, "total_makespan")
-    md.add_max_equality(total_makespan, [sem[fc][jt][k][1] for fc in sem.keys() for jt in sem[fc].keys() for k in range(max_job[fc][jt])])
+    total_makespan = md.addVar(vtype=GRB.INTEGER, lb=0, ub=horizon, name="total_makespan")
+    md.addGenConstrMax(total_makespan, [sem[fc][jt][k][1] for fc in sem.keys() for jt in sem[fc].keys() for k in range(max_job[fc][jt])])
 
-    before_makespan = {t: md.new_bool_var(f"{t}_before_makespan") for t in range(1, horizon)}
+    before_makespan = {t: md.addVar(vtype=GRB.BINARY, name=f"{t}_before_makespan") for t in range(1, horizon)}
     for t in range(1, horizon):
-        md.add(total_makespan >= t + 1).only_enforce_if(before_makespan[t])
-        md.add(total_makespan <= t).only_enforce_if(before_makespan[t].Not())
+        md.addGenConstrIndicator(before_makespan[t], True, total_makespan >= t + 1)
+        md.addGenConstrIndicator(before_makespan[t], False, total_makespan <= t)
 
     held, holding = {}, {}
     for fc in fc_wip_t.keys():
         held[fc], holding[fc] = {}, {}
         for wip in fc_wip_t[fc].keys():
-            held[fc][wip] = {t: md.new_int_var(0, horizon, f"{fc}_{wip}_{t}_held") for t in range(1, horizon)}
+            held[fc][wip] = {t: md.addVar(vtype=GRB.INTEGER, lb=0, ub=horizon, name=f"{fc}_{wip}_{t}_held") for t in range(1, horizon)}
             for t in range(1, horizon):
-                md.add(held[fc][wip][t] >= fc_wip_t[fc][wip][t] - horizon * (1 - before_makespan[t]))
+                md.addConstr(held[fc][wip][t] >= fc_wip_t[fc][wip][t] - horizon * (1 - before_makespan[t]))
             holding[fc][wip] = holding_cost.get(wip, 0) * sum(held[fc][wip].values())
     hold_ub = sum(holding_cost.get(wip, 0) * horizon * (horizon - 1) for fc in fc_wip_t for wip in fc_wip_t[fc])
 
@@ -138,40 +137,40 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
             deliver_time, route = getattr(deliver, f"{fc}{fc_prime}"), f"{fc}→{fc_prime}"
             held[route], holding[route] = {}, {}
             for jt in delivering[fc][fc_prime]:
-                held[route][jt] = {t: md.new_int_var(0, horizon * deliver_time, f"{route}_{jt}_{t}_held") for t in range(1, horizon)}
+                held[route][jt] = {t: md.addVar(vtype=GRB.INTEGER, lb=0, ub=horizon * deliver_time, name=f"{route}_{jt}_{t}_held") for t in range(1, horizon)}
                 for t in range(1, horizon):
                     in_transit = sum(delivering[fc][fc_prime][jt][s][lot_unit] * lot_unit for s in range(max(1, t - deliver_time + 1), t + 1) for lot_unit in ini_set[fc][jt])
-                    md.add(held[route][jt][t] >= in_transit - horizon * deliver_time * (1 - before_makespan[t]))
+                    md.addConstr(held[route][jt][t] >= in_transit - horizon * deliver_time * (1 - before_makespan[t]))
                 holding[route][jt] = holding_cost.get(jt, 0) * sum(held[route][jt].values())
                 hold_ub += holding_cost.get(jt, 0) * horizon * deliver_time * (horizon - 1)
-    total_holding = md.new_int_var(0, hold_ub, "total_holding_cost")
-    md.add(total_holding == sum(holding[fc][wip] for fc in holding for wip in holding[fc]))
+    total_holding = md.addVar(vtype=GRB.INTEGER, lb=0, ub=hold_ub, name="total_holding_cost")
+    md.addConstr(total_holding == gp.quicksum(holding[fc][wip] for fc in holding for wip in holding[fc]))
 
     w = params["weights"]
-    md.minimize(w["makespan"] * total_makespan + w["holding"] * total_holding + w["truck_used"] * truck_used + w["truck_travel"] * truck_travel)
-    solver = cp_model.CpSolver()
-    status = solver.Solve(md)
+    md.setObjective(w["makespan"] * total_makespan + w["holding"] * total_holding + w["truck_used"] * truck_used + w["truck_travel"] * truck_travel, GRB.MINIMIZE)
+    md.optimize()
 
-    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        total_makespan = round(solver.value(total_makespan))
-        print("Status :", solver.status_name(status), f"(horizon = {horizon})")
+    if md.Status == GRB.OPTIMAL:
+        total_makespan = round(total_makespan.X)
+        print("Status :", md.Status, f"(horizon = {horizon})")
         print("Total Makespan :", total_makespan)
-        print("Holding Cost :", solver.value(total_holding))
+        print("Holding Cost :", total_holding.X)
         for fc in holding.keys():
             for wip in holding[fc].keys():
-                if cost := solver.value(holding[fc][wip]):
-                    print(f"    {fc} {wip} : {cost} (= {holding_cost.get(wip, 0)} x {sum(solver.value(v) for v in held[fc][wip].values())} unit*time)")
-        print("Truck Used :", solver.value(truck_used), "/", tps)
-        print("Truck Travel :", solver.value(truck_travel), "\n")
+                if cost := holding[fc][wip].getValue():
+                    print(f"    {fc} {wip} : {cost} (= {holding_cost.get(wip, 0)} x {sum(v.X for v in held[fc][wip].values())} unit*time)")
+        print("Truck Used :", truck_used.X, "/", tps)
+        print("Truck Travel :", truck_travel.X, "\n")
 
-        jobs = [(fc, jt, k, solver.value(sem[fc][jt][k][0]), solver.value(sem[fc][jt][k][1])) for fc in sem.keys() for jt in sem[fc].keys() for k in range(max_job[fc][jt]) if solver.value(sem[fc][jt][k][2])]
+        jobs = [(fc, jt, k, round(sem[fc][jt][k][0].X), round(sem[fc][jt][k][1].X)) for fc in sem.keys() for jt in sem[fc].keys() for k in range(max_job[fc][jt]) if round(sem[fc][jt][k][2].X)]
 
-        trucks = [{"home": f, "loc": f, "free": 0, "moves": []} for f in fcs for _ in range(solver.value(truck_idle[f][0]))]
-        departures = sorted((t, f, g, solver.value(truck_move[(f, g)][t])) for f, g in arcs for t in range(1, horizon) if solver.value(truck_move[(f, g)][t]))
+        trucks = [{"home": f, "loc": f, "free": 0, "moves": []} for f in fcs for _ in range(round(truck_idle[f][0].X))]
+        departures = sorted((t, f, g, truck_move[(f, g)][t].X) for f, g in arcs for t in range(1, horizon) if truck_move[(f, g)][t].X)
         for t, f, g, num in departures:
             cargo = {}
             if g in delivering.get(f, {}):
-                cargo = {jt: amount for jt in delivering[f][g] if (amount := sum(solver.value(delivering[f][g][jt][t][lot_unit]) * lot_unit for lot_unit in ini_set[f][jt]))}
+                cargo = {jt: amount for jt in delivering[f][g] if (amount := sum(delivering[f][g][jt][t][lot_unit].X * lot_unit for lot_unit in ini_set[f][jt]))}
+            num = round(num)
             ready = [truck for truck in trucks if truck["loc"] == f and truck["free"] <= t][:num]
             assert len(ready) == num, f"truck flow broken at {f} t={t}"
             for i, truck in enumerate(ready):
@@ -284,8 +283,7 @@ def start(boms, factories, holding_cost, deliveries, params):
     for fc1 in deliveries.keys():
         for fc2 in deliveries[fc1].keys():
             setattr(deliver, f"{fc1}{fc2}", deliveries[fc1][fc2])
-    lot_stream(process, deliver, boms, holding_cost, ini_set, params, set_horizon(boms, factories, deliveries, params))
-
+    system(process, deliver, boms, holding_cost, ini_set, params, set_horizon(boms, factories, deliveries, params))
 
 def main():
 
