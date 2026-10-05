@@ -18,7 +18,7 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
         fc_wip_t[fc] = {}
         for jt in ini_set[fc].keys():
             fc_wip_t[fc][jt] = {t: md.new_int_var(0, horizon, f"{fc}_{jt}_{t}") if t else 0 for t in range(horizon)}
-            for fc_prime in set([fc_prime for fc_prime in ini_set.keys() for jt_prime in ini_set[fc_prime] if jt_prime in boms and jt in boms[jt_prime]]):
+            for fc_prime in set([fc_prime for fc_prime in ini_set.keys() if fc_prime != fc for jt_prime in ini_set[fc_prime] if jt_prime in boms and jt in boms[jt_prime]]): # 같은 공장 안에서 쓰는 재료는 배송 없이 fc_wip_t 에서 바로 소비
                 if fc not in delivering: delivering[fc] = {}
                 if fc_prime not in delivering[fc]: delivering[fc][fc_prime] = {}
                 delivering[fc][fc_prime][jt] = {t: {lot_unit: md.new_int_var(0, max_job[fc][jt] // lot_unit, f"{fc}_{jt}_{t}_deliver_to_{fc_prime}_{lot_unit}") for lot_unit in ini_set[fc][jt]} for t in range(1, horizon)}
@@ -27,11 +27,6 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
             for ingredient in delivering[fc][fc_prime].keys():
                 if ingredient not in fc_wip_t[fc_prime]:
                     fc_wip_t[fc_prime][ingredient] = {t: md.new_int_var(0, horizon, f"{fc_prime}_{ingredient}_{t}") if t else 0 for t in range(horizon)}
-
-    def departing(fc, wip, t): # t에 fc에서 출발하는 wip 수량
-        return sum(delivering[fc][fc_prime][wip][t][lot_unit] * lot_unit for fc_prime in delivering.get(fc, {}) if wip in delivering[fc][fc_prime] for lot_unit in ini_set[fc][wip])
-    def arriving(fc, wip, t): # t에 fc에 도착하는 wip 수량 (= t - 배송시간 에 출발한 수량)
-        return sum(delivering[fc1][fc][wip][t - getattr(deliver, f"{fc1}{fc}")][lot_unit] * lot_unit for fc1 in delivering if wip in delivering[fc1].get(fc, {}) and t - getattr(deliver, f"{fc1}{fc}") >= 1 for lot_unit in ini_set[fc1][wip])
 
     sem, intervals = {}, {} # Start End Make => Interval
     produced, consumed = {}, {}
@@ -77,16 +72,6 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
             for t in range(1, horizon):
                 md.add(produced[fc][jt][t] == sum(se_event[fc][jt][k][t - process_time] for k in range(max_job[fc][jt]) if t - process_time >= 1))
 
-        for ingredient in set(ingredient for fc1 in delivering for ingredient in delivering[fc1].get(fc, {})):
-            use_this_ingredient_jt = [jt for jt in ini_set[fc].keys() if jt in boms and ingredient in boms[jt]]
-            for t in range(1, horizon):
-                md.add(fc_wip_t[fc][ingredient][t - 1] + arriving(fc, ingredient, t) >= sum(boms[jt][ingredient] * sum(se_event[fc][jt][k][t] for k in range(max_job[fc][jt])) for jt in use_this_ingredient_jt))
-
-    for fc in delivering.keys():
-        for jt in ini_set[fc].keys():
-            for t in range(1, horizon):
-                md.add(fc_wip_t[fc][jt][t - 1] + produced[fc][jt][t] - sum(consumed[fc][jt_prime][jt][t] for jt_prime in ini_set[fc].keys() if jt_prime in boms and jt in boms[jt_prime]) >= departing(fc, jt, t))
-
     fcs, tps = list(ini_set), params["tps"]
     arcs = [(fc1, fc2) for fc1 in fcs for fc2 in fcs if fc1 != fc2]
     truck_move = {arc: {t: md.new_int_var(0, tps, f"truck_{arc[0]}_to_{arc[1]}_{t}") for t in range(1, horizon)} for arc in arcs} # t에 f -> g 출발하는 트럭 수 (빈 차 이동 포함)
@@ -107,7 +92,6 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
 
     for fc in delivering.keys():
         for fc_prime in delivering[fc].keys():
-            if fc == fc_prime: continue
             for t in range(1, horizon):
                 load = sum(delivering[fc][fc_prime][jt][t][lot_unit] * lot_unit for jt in delivering[fc][fc_prime] for lot_unit in ini_set[fc][jt])
                 md.add(load <= sum(max_job[fc][jt] for jt in delivering[fc][fc_prime]) * truck_move[(fc, fc_prime)][t])
@@ -118,7 +102,9 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
     for fc in fc_wip_t.keys():
         for wip in fc_wip_t[fc].keys():
             for t in range(1, horizon):
-                md.add(fc_wip_t[fc][wip][t] == fc_wip_t[fc][wip][t - 1] + (produced[fc][wip][t] if wip in produced[fc] else 0) + arriving(fc, wip, t) - sum(consumed[fc][jt_prime][wip][t] for jt_prime in consumed[fc] if wip in consumed[fc][jt_prime]) - departing(fc, wip, t))
+                plus = (produced[fc][wip][t] if wip in produced[fc] else 0) + sum(delivering[fc1][fc][wip][t - getattr(deliver, f"{fc1}{fc}")][lot_unit] * lot_unit for fc1 in delivering if wip in delivering[fc1].get(fc, {}) and t - getattr(deliver, f"{fc1}{fc}") >= 1 for lot_unit in ini_set[fc1][wip])
+                minus = sum(consumed[fc][jt_prime][wip][t] for jt_prime in consumed[fc] if wip in consumed[fc][jt_prime]) + sum(delivering[fc][fc_prime][wip][t][lot_unit] * lot_unit for fc_prime in delivering.get(fc, {}) if wip in delivering[fc][fc_prime] for lot_unit in ini_set[fc][wip])
+                md.add(fc_wip_t[fc][wip][t] == fc_wip_t[fc][wip][t - 1] + plus - minus)
 
     every_final_product_max_set = {} # every_final_product_max_set[final_product][fc] : fc 에서의 최대 재고
     for final_product, amount in zip(params["final_product"], params["amount"]):
@@ -161,10 +147,8 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
     total_holding = md.new_int_var(0, hold_ub, "total_holding_cost")
     md.add(total_holding == sum(holding[fc][wip] for fc in holding for wip in holding[fc]))
 
-    w_used = tps * horizon + 1
-    w_hold = tps * w_used + w_used
-    w_makespan = hold_ub * w_hold + w_hold
-    md.minimize(w_makespan * total_makespan + w_hold * total_holding + w_used * truck_used + truck_travel)
+    w = params["weights"]
+    md.minimize(w["makespan"] * total_makespan + w["holding"] * total_holding + w["truck_used"] * truck_used + w["truck_travel"] * truck_travel)
     solver = cp_model.CpSolver()
     status = solver.Solve(md)
 
@@ -278,9 +262,9 @@ def set_horizon(boms, factories, deliveries, params):
         return t
 
     finish = {}
-    def finish_time(jt): # jt 를 필요량만큼 다 만든 시점
+    def finish_time(jt):
         if jt not in finish:
-            arrive = [finish_time(ing) + max(deliveries[fc1][fc2] if fc1 != fc2 else 1 for fc1 in producers[ing] for fc2 in producers[jt]) for ing in boms.get(jt, {})]
+            arrive = [finish_time(ing) + max(deliveries[fc1][fc2] if fc1 != fc2 else 0 for fc1 in producers[ing] for fc2 in producers[jt]) for ing in boms.get(jt, {})]
             finish[jt] = max([1] + arrive) + make_time(jt)
         return finish[jt]
 
@@ -305,7 +289,8 @@ def start(boms, factories, holding_cost, deliveries, params):
 
 def main():
 
-    params = {"tps": 8, "final_product": ["JT12", "JT9"], "amount": [1, 1]}
+    params = {"tps": 8, "final_product": ["JT12", "JT9"], "amount": [1, 1],
+              "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}} # 목적함수 가중치
 
     boms = {
         "JT4": {
@@ -330,7 +315,8 @@ def main():
         
         "Fc3": {
             "JT4": {"lots": [2], "time": 2},
-            "JT5": {"lots": [2], "time": 2}},
+            "JT5": {"lots": [2], "time": 2},
+            "JT9": {"lots": [1], "time": 3}},
 
         "Fc4": {
             "JT9": {"lots": [1], "time": 3}},
