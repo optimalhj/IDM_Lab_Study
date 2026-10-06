@@ -21,7 +21,8 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
     for fc in ini_set.keys():
         fc_wip_t[fc] = {}
         for jt in ini_set[fc].keys():
-            fc_wip_t[fc][jt] = {t: md.addVar(vtype=GRB.INTEGER, lb=0, name=f"{fc}_{jt}_{t}") if t else 0 for t in range(horizon)}
+            fc_wip_t[fc][jt] = {t: md.addVar(vtype=GRB.CONTINUOUS if jt in params["float_unit"] else GRB.INTEGER, lb=0, name=f"{fc}_{jt}_{t}") if t else 0 for t in range(horizon)}
+
             for fc_prime in set([fc_prime for fc_prime in ini_set.keys() if fc_prime != fc for jt_prime in ini_set[fc_prime] if jt_prime in boms and jt in boms[jt_prime]]): # 같은 공장 안에서 쓰는 재료는 배송 없이 fc_wip_t 에서 바로 소비
                 if fc not in delivering: delivering[fc] = {}
                 if fc_prime not in delivering[fc]: delivering[fc][fc_prime] = {}
@@ -30,7 +31,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         for fc_prime in delivering[fc].keys():
             for ingredient in delivering[fc][fc_prime].keys():
                 if ingredient not in fc_wip_t[fc_prime]:
-                    fc_wip_t[fc_prime][ingredient] = {t: md.addVar(vtype=GRB.INTEGER, lb=0, name=f"{fc_prime}_{ingredient}_{t}") if t else 0 for t in range(horizon)}
+                    fc_wip_t[fc_prime][ingredient] = {t: md.addVar(vtype=GRB.CONTINUOUS if ingredient in params["float_unit"] else GRB.INTEGER,  lb=0, name=f"{fc_prime}_{ingredient}_{t}") if t else 0 for t in range(horizon)}
 
     sem = {} # Start End Make => Interval
     produced, consumed = {}, {}
@@ -43,14 +44,14 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         for jt in ini_set[fc].keys():
             process_time = getattr(process, f"{fc}{jt}")
             sem[fc][jt] = {}
-            produced[fc][jt] = {t: md.addVar(vtype=GRB.BINARY, name=f"{fc}_{jt}_{t}_produced") for t in range(1, horizon)}
+            produced[fc][jt] = {t: md.addVar(vtype=GRB.CONTINUOUS if jt in params["float_unit"] else GRB.INTEGER, lb=0, name=f"{fc}_{jt}_{t}_produced") for t in range(1, horizon)}
             if jt in boms:
-                consumed[fc][jt] = {ingredient: {t: md.addVar(vtype=GRB.INTEGER, lb=0, ub=boms[jt][ingredient], name=f"{fc}_{ingredient}_{t}_consumed") for t in range(1, horizon)} for ingredient in boms[jt].keys()}
+                consumed[fc][jt] = {ingredient: {t: md.addVar(vtype=GRB.CONTINUOUS if ingredient in params["float_unit"] else GRB.INTEGER, lb=0, ub=boms[jt][ingredient], name=f"{fc}_{ingredient}_{t}_consumed") for t in range(1, horizon)} for ingredient in boms[jt].keys()}
 
             se_event[fc][jt] = {}
             for k in range(max_job[fc][jt]):
                 se_event[fc][jt][k] = {}
-                sem[fc][jt][k] = [md.addVar(vtype=GRB.INTEGER, lb=1, ub=horizon - 1, name=f"{fc}_{jt}_{k}_st"), md.addVar(vtype=GRB.INTEGER, lb=1, ub=horizon - 1, name=f"{fc}_{jt}_{k}_ed"), md.addVar(vtype=GRB.BINARY, name=f"{fc}_{jt}_{k}_mk")]
+                sem[fc][jt][k] = [md.addVar(vtype=GRB.CONTINUOUS, lb=1, ub=horizon - 1, name=f"{fc}_{jt}_{k}_st"), md.addVar(vtype=GRB.CONTINUOUS, lb=1, ub=horizon - 1, name=f"{fc}_{jt}_{k}_ed"), md.addVar(vtype=GRB.BINARY, name=f"{fc}_{jt}_{k}_mk")]
                 md.addConstr(sem[fc][jt][k][0] + process_time * sem[fc][jt][k][2]== sem[fc][jt][k][1])
                 if k:
                     md.addConstr(sem[fc][jt][k - 1][2] >= sem[fc][jt][k][2])
@@ -110,11 +111,11 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         every_final_product_max_set[final_product] = {}
         for fc in ini_set.keys():
             if final_product in ini_set[fc]:
-                every_final_product_max_set[final_product][fc] = md.addVar(vtype=GRB.INTEGER, lb=0, ub=horizon, name=f"{fc}_{final_product}_FP")
+                every_final_product_max_set[final_product][fc] = md.addVar(vtype=GRB.CONTINUOUS if final_product in params["float_unit"] else GRB.INTEGER, lb=0, ub=horizon, name=f"{fc}_{final_product}_FP")
                 md.addGenConstrMax(every_final_product_max_set[final_product][fc], fc_wip_t[fc][final_product].values())
         md.addConstr(sum(every_final_product_max_set[final_product].values()) >= amount)
 
-    total_makespan = md.addVar(vtype=GRB.INTEGER, lb=0, ub=horizon, name="total_makespan")
+    total_makespan = md.addVar(vtype=GRB.CONTINUOUS, lb=0, ub=horizon, name="total_makespan")
     md.addGenConstrMax(total_makespan, [sem[fc][jt][k][1] for fc in sem.keys() for jt in sem[fc].keys() for k in range(max_job[fc][jt])])
 
     before_makespan = {t: md.addVar(vtype=GRB.BINARY, name=f"{t}_before_makespan") for t in range(1, horizon)}
@@ -302,7 +303,7 @@ def start(boms, factories, holding_cost, deliveries, params):
 
 def main():
 
-    params = {"tps": 8, "final_product": ["JT12", "JT9"], "amount": [1, 1],
+    params = {"tps": 8, "final_product": ["JT12", "JT9"], "amount": [1, 1], "float_unit": ["JT4", "JT9"],
               "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}} # 목적함수 가중치
 
     boms = {

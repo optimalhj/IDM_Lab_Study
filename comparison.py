@@ -47,23 +47,18 @@ def start(boms, factories, holding_cost, deliveries, params, comparison_num=15):
 
     horizon_info = set_horizon(boms, factories, deliveries, params)
     cp_times, lp_times = [], []
-    print("Cp")
-    for _ in range(comparison_num):
-        st = time.time()
-        main_single_stage_cp.system(process, deliver, boms, holding_cost, ini_set, params, horizon_info)
-        cp_times.append(time.time() - st)
-
-    for _ in range(comparison_num):
-        st = time.time()
-        main_single_stage_gp.system(process, deliver, boms, holding_cost, ini_set, params, horizon_info)
-        lp_times.append(time.time() - st)
+    for system, times_list in zip((main_single_stage_cp.system, main_single_stage_gp.system), (cp_times, lp_times)):
+        for _ in range(comparison_num):
+            st = time.time()
+            system(process, deliver, boms, holding_cost, ini_set, params, horizon_info)
+            times_list.append(time.time() - st)
 
     print("cp :", sum(cp_times) / comparison_num, cp_times)
     print("lp :", sum(lp_times) / comparison_num, lp_times)
 
 def main():
 
-    params = {"tps": 8, "final_product": ["JT12", "JT9"], "amount": [1, 1],
+    params = {"tps": 8, "final_product": ["JT12", "JT9"], "amount": [1, 1], "float_unit": ["JT4", "JT9"],
                   "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}} # 목적함수 가중치
     
     boms = {
