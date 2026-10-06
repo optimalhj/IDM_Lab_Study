@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from ortools.sat.python import cp_model
 
-def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
+def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
     need = {}
     def explode(jt, qty):
         need[jt] = need.get(jt, 0) + qty
@@ -183,16 +183,27 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
             for f, g, t, arrive, cargo in truck["moves"]:
                 print(f"    {f} -> {g} | {t} ~ {arrive} ({arrive - t}) | {cargo if cargo else 'empty'}")
 
+        virtual_moves = []  # Virtual Truck : 같은 공장 생산품이 상위 job 에 투입된 시점 (내부 이송, 시간 0)
+        for f in ini_set.keys():
+            for t in range(1, horizon):
+                if cargo := {ing: amount for ing in ini_set[f] if (amount := round(sum(solver.value(consumed[f][jt][ing][t]) for jt in consumed[f] if ing in consumed[f][jt])))}:
+                    virtual_moves.append((f, t, cargo))
+        virtual_moves.sort(key=lambda move: move[1])
+        print("vt (Virtual Truck)")
+        for f, t, cargo in virtual_moves:
+            print(f"    {f} -> {f} | {t} | {cargo}")
+
         palette = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
-        INK, MUTED, GRID, GO, RETURN = "#1f2328", "#6b7280", "#e5e7eb", "#4b5563", "#d1d5db"
+        INK, MUTED, GRID, GO, RETURN, VIRTUAL = "#1f2328", "#6b7280", "#e5e7eb", "#4b5563", "#d1d5db", "#7c3aed"
 
         jt_order = list(dict.fromkeys(jt for fc in ini_set for jt in ini_set[fc]))
         jt_color = {jt: palette[i % len(palette)] for i, jt in enumerate(jt_order)}
-        text_on = lambda hex_color: INK if sum(int(hex_color[i:i + 2], 16) * w for i, w in ((1, 0.299), (3, 0.587), (5, 0.114))) > 140 else "white" # 막대 밝기에 따라 글자색
+        text_on = lambda hex_color: INK if sum(int(hex_color[i:i + 2], 16) * w for i, w in ((1, 0.299), (3, 0.587), (5, 0.114))) > 140 else "white"  # 막대 밝기에 따라 글자색
         n_truck = len(trucks)
 
         y_of = {f"tr{i + 1} ({truck['home']})": i for i, truck in enumerate(trucks)}
         truck_rows = list(y_of.keys())
+        y_of["vt (virtual)"] = n_truck
         fc_first_row = {}
         for fc in ini_set:
             fc_first_row[fc] = len(y_of) + 1
@@ -216,17 +227,21 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
                 label += "\n" + " ".join(f"{jt}×{n}" for jt, n in cargo.items()) if cargo else "\nempty"
                 ax.text((depart + arrive) / 2, y, label, ha="center", va="center", fontsize=6, color="white" if cargo else INK)
 
+        for f, t, cargo in virtual_moves:  # 이송 시간이 0 이므로 막대 대신 마커 + 라벨
+            ax.plot(t, n_truck - 0.2, marker="v", markersize=7, color=VIRTUAL)
+            ax.text(t, n_truck + 0.05, f"{f}\n" + "\n".join(f"{jt}×{n}" for jt, n in cargo.items()), ha="center", va="top", fontsize=6, color=VIRTUAL)
+
         ax.axvline(total_makespan, color=INK, linestyle="--", linewidth=1)
         ax.text(total_makespan, -0.9, f"makespan = {total_makespan} ", ha="right", va="center", fontsize=8, color=INK)
         for fc in list(fc_first_row)[1:]:
             ax.axhline(fc_first_row[fc] - 0.5, color=GRID, linewidth=0.8)
-        ax.axhline(n_truck, color=MUTED, linewidth=1)
+        ax.axhline(n_truck + 1, color=MUTED, linewidth=1)
 
         ax.set_yticks(list(y_of.values()), list(y_of.keys()))
         ax.set_ylim(len(y_of) + 0.5, -1.4)
         ax.set_xlim(0, x_max)
         ax.set_xlabel("Time", color=MUTED)
-        ax.set_title(f"Production & Delivery Gantt  (trucks used {n_truck} / tps {tps})", loc="left", color=INK)
+        ax.set_title(f"Production & Delivery Gantt  (trucks used {n_truck} / tps {tps} + 1 virtual)", loc="left", color=INK)
         ax.grid(axis="x", color=GRID, linewidth=0.8)
         ax.set_axisbelow(True)
         for side in ("top", "right", "left"):
@@ -234,7 +249,7 @@ def lot_stream(process, deliver, boms, holding_cost, ini_set, params, horizon):
         ax.tick_params(colors=MUTED, length=0)
 
         handles = [Patch(color=jt_color[jt], label=jt) for jt in jt_order]
-        handles += [Patch(color=GO, label="truck: loaded"), Patch(color=RETURN, label="truck: empty move")]
+        handles += [Patch(color=GO, label="truck: loaded"), Patch(color=RETURN, label="truck: empty move"), Patch(color=VIRTUAL, label="virtual truck: internal move")]
         ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.01, 1), frameon=False, fontsize=8)
         plt.tight_layout()
         plt.show()
@@ -284,7 +299,7 @@ def start(boms, factories, holding_cost, deliveries, params):
     for fc1 in deliveries.keys():
         for fc2 in deliveries[fc1].keys():
             setattr(deliver, f"{fc1}{fc2}", deliveries[fc1][fc2])
-    lot_stream(process, deliver, boms, holding_cost, ini_set, params, set_horizon(boms, factories, deliveries, params))
+    system(process, deliver, boms, holding_cost, ini_set, params, set_horizon(boms, factories, deliveries, params))
 
 
 def main():
@@ -311,7 +326,8 @@ def main():
             "JT2": {"lots": [4, 8], "time": 1}},
 
         "Fc2": {
-            "JT1": {"lots": [1, 2, 3, 4], "time": 2}},
+            "JT1": {"lots": [1, 2, 3, 4], "time": 2},
+            "JT5": {"lots": [1, 2], "time": 2}},
         
         "Fc3": {
             "JT4": {"lots": [2], "time": 2},
