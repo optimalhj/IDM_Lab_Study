@@ -25,7 +25,7 @@ def set_horizon(boms, factories, deliveries, params):
     def finish_time(jt):
         if jt not in finish:
             arrive = [finish_time(ing) + max(deliveries[fc1][fc2] if fc1 != fc2 else 0 for fc1 in producers[ing] for fc2 in producers[jt]) for ing in boms.get(jt, {})]
-            finish[jt] = max([1] + arrive) + make_time(jt)
+            finish[jt] = max([0] + arrive) + make_time(jt)
         return finish[jt]
 
     return max(finish_time(jt) for jt in target) + 1 # job 종료 시점 <= horizon - 1
