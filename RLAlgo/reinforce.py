@@ -13,11 +13,7 @@ class REINFORCE:
         
         
         if method=='EasyMatch':
-            self.policy_net = MatchingModel(
-                tanker_dim=5,
-                tractor_dim=7,
-                extra_dim=4
-            ).to(device)
+            self.policy_net = MatchingModel(tanker_dim=5,tractor_dim=7,extra_dim=4).to(device)
         else:
             raise ValueError(f'Unknown method {method} for REINFORCE')
         

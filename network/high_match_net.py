@@ -114,8 +114,8 @@ class MatchingModel(nn.Module):
     def __init__(
         self, 
         tanker_dim=5,        # Feature dimension of refueling vehicles
-        tractor_dim=8,       # Feature dimension of agricultural machines (including virtual orders)
-        extra_dim=1,         # Pair extra feature dimension (replaced time_dim)
+        tractor_dim=7,       # Feature dimension of agricultural machines (including virtual orders)
+        extra_dim=4,         # Pair extra feature dimension (replaced time_dim)
         d_model=64,          # Transformer hidden dimension
         nhead=2,             # Number of Transformer attention heads
         num_layers=2,        # Number of Transformer layers
@@ -173,15 +173,11 @@ class MatchingModel(nn.Module):
         tanker_features_expanded = tanker_features.unsqueeze(2)
         # [batch_size, 1, num_tractors, d_model]
         tractor_features_expanded = tractor_features.unsqueeze(1)
-        
+
         # Expand features to match dimensions
         # [batch_size, num_tankers, num_tractors, d_model]
-        tanker_features_expanded = tanker_features_expanded.expand(
-            -1, -1, num_tractors, -1
-        )
-        tractor_features_expanded = tractor_features_expanded.expand(
-            -1, num_tankers, -1, -1
-        )
+        tanker_features_expanded = tanker_features_expanded.expand(-1, -1, num_tractors, -1)
+        tractor_features_expanded = tractor_features_expanded.expand(-1, num_tankers, -1, -1)
         
         # Flatten the expanded features to concatenate with pair_extra_features
         # [batch_size, num_tankers * num_tractors, d_model]
@@ -195,18 +191,17 @@ class MatchingModel(nn.Module):
             tractor_features_flat,
             pair_extra_features
         ], dim=-1)
-        
+
         # Compute matching scores through MLP
-        # [batch_size, num_tankers*num_tractors, 1]
+        # [batch_size, num_tankers * num_tractors, 1]
         match_scores_flat = self.mlp_matcher(pair_features)
-        
+
         # Reshape to [batch_size, num_tankers * num_online tractors]
         match_scores = match_scores_flat.squeeze(-1)
-        
         if mask is not None:
             match_scores = match_scores.masked_fill(mask, float('-inf'))
-        
+
         # Apply Softmax to get probabilities
         probs = F.softmax(match_scores, dim=-1)
-        
+
         return probs

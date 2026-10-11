@@ -38,9 +38,9 @@ class REINFORCE2:
 
     def take_action(self, state, force_greedy=True):  # 根据动作概率分布随机采样
         s1, s2 = state
-        # s1: (N, Feat_Dim) -> (1, N, Feat_Dim)
+        # s1: (N, Feat_Dim) -> (1, N, Feat_Dim) / online_harvester_features
         s1_tensor = torch.tensor(s1, dtype=torch.float).to(self.device)
-        # s2: (Context_Dim,) -> (1, Context_Dim)
+        # s2: (Context_Dim,) -> (1, Context_Dim) / idle_tankers_features
         s2_tensor = torch.tensor(s2, dtype=torch.float).to(self.device)
         
         # 单样本推理不需要 mask (或者 mask 全为 True)
@@ -111,9 +111,9 @@ class REINFORCE2:
             
             # 分离 s1 和 s2，并将 s1 转为 Tensor 以便 padding
             for s in state_list:
-                # s[0] 是变长序列 (N, Feat_Dim)
+                # s[0] 是变长序列 (N, Feat_Dim) ; online_harvester_features
                 all_s1.append(torch.tensor(s[0], dtype=torch.float))
-                # s[1] 是定长向量 (Context_Dim,)
+                # s[1] 是定长向量 (Context_Dim,) ; idle_tankers_features
                 all_s2.append(s[1])
             
             all_actions.extend(action_list)

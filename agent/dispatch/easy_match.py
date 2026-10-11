@@ -287,8 +287,7 @@ class EasyMatchAgent(BaseDispatchAgent):
             all_tanker_features = self.return_all_tanker_features(env)
             all_harvester_features = self.return_all_harvester_features(env)
             
-            online_harvesters = [hid for hid in range(NUM_HARVESTERS) if env.harvester_working_status[hid]==0]
-            online_harvesters = np.array(online_harvesters)
+            online_harvesters = np.array([hid for hid in range(NUM_HARVESTERS) if env.harvester_working_status[hid]==0])
             
             online_harvesters_features = all_harvester_features[online_harvesters]
             

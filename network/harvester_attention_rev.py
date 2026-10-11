@@ -26,8 +26,7 @@ class HarvesterAttention(nn.Module):
 
         # 上下文处理模块
         self.context_encoder = TransformerEncoder(
-            input_dim=d_context_in,
-            d_model=d_context_hidden, nhead=2, num_layers=2)
+            input_dim=d_context_in, d_model=d_context_hidden, nhead=2, num_layers=2)
 
         # Q/K映射线性层
         self.W_q = nn.Linear(self.d_model, d_k)
@@ -56,8 +55,8 @@ class HarvesterAttention(nn.Module):
         """
         前向传播
         Args:
-            x: 农机特征 (batch_size, num_agri, 2 + d_self)
-            context: 上下文序列 (batch_size, seq_len, d_context_in)
+            x: 农机特征 (batch_size, num_agri, 2 + d_self)   -> online_harvester_features(3, 3, 7)
+            context: 上下文序列 (batch_size, seq_len, d_context_in)   -> idle_tankers_features(3, 2, 5)
             mask: 掩码 (batch_size, num_agri), True表示有效, False表示padding
         Returns:
             reposition_vec: 重定位原始向量（x/y坐标），shape=(batch_size, 2)

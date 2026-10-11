@@ -83,4 +83,13 @@ class TankerDataSetV3(Dataset):
 
 if __name__ == "__main__":
     from parameter import DATA_DIR
-    TankerDataSetV3(os.path.join(DATA_DIR, "train.csv"))
+    dataset = TankerDataSetV3(os.path.join(DATA_DIR, "train.csv"))
+
+    print(len(dataset.did_data))
+    print(len(dataset.records_data))
+
+    for idx in range(len(dataset.did_data)):
+        did, record = dataset.did_data[idx], dataset.records_data[idx]
+        print(f"Guroup {idx}")
+        print(f"Did: {did}\nRecord shape: {record}")
+        print()
