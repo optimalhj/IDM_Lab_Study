@@ -20,7 +20,6 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
     md = cp_model.CpModel() # 모든 변수는 정수형 (params["float_unit"] 은 사용하지 않음)
 
     st_time = time.time()
-
     fc_wip_t, delivering = {}, {} # delivering[보내는 fc][받는 fc][jt][t][lot_unit] : t에 출발하는 lot 수
     for fc in ini_set.keys():
         fc_wip_t[fc] = {}
