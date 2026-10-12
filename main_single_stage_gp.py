@@ -168,7 +168,8 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
     md.optimize()
 
     if md.Status == GRB.OPTIMAL:
-        print("Calculated time =", time.time() - st_time)
+        calculating_time = time.time() - st_time
+        print("Calculated time =", calculating_time)
         total_makespan = round(total_makespan.X)
         print("Status :", md.Status, f"(horizon = {horizon})")
         print("Total Makespan :", total_makespan)
@@ -285,9 +286,9 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.83, 0.95), frameon=False, fontsize=8)
         fig.tight_layout(rect=(0, 0, 0.83, 1))
         plt.show()
+        return calculating_time
     else:
         print("X")
-    return
 
 def set_horizon(boms, factories, deliveries, params):
 

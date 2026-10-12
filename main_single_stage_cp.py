@@ -173,12 +173,11 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
     w = params["weights"]
     md.minimize(w["makespan"] * total_makespan + w["holding"] * total_holding + w["truck_used"] * truck_used + w["truck_travel"] * truck_travel)
     solver = cp_model.CpSolver()
-    if params.get("time_limit"):
-        solver.parameters.max_time_in_seconds = params["time_limit"]
     status = solver.Solve(md)
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        print("Calculated time =", time.time() - st_time)
+        calculating_time = time.time() - st_time
+        print("Calculated time =", calculating_time)
         total_makespan = solver.value(total_makespan)
         print("Status :", solver.status_name(status), f"(horizon = {horizon})")
         print("Total Makespan :", total_makespan)
@@ -295,9 +294,10 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.83, 0.95), frameon=False, fontsize=8)
         fig.tight_layout(rect=(0, 0, 0.83, 1))
         plt.show()
+        return calculating_time
     else:
         print("X")
-    return
+
 
 def set_horizon(boms, factories, deliveries, params):
 
@@ -345,7 +345,7 @@ def start(boms, factories, holding_cost, deliveries, params):
 
 def main():
 
-    params = {"tps": 6, "final_product": ["JT12", "JT9"], "amount": [2, 1], "time_limit": None, # time_limit : 초 단위 제한 (None 이면 최적까지)
+    params = {"tps": 6, "final_product": ["JT12", "JT9"], "amount": [2, 1],
               "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}} # 목적함수 가중치, tps : 트럭 대수 (용량 무한)
 
     boms = {

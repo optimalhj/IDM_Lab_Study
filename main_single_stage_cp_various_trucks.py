@@ -184,12 +184,11 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
     w = params["weights"]
     md.minimize(w["makespan"] * total_makespan + w["holding"] * total_holding + w["truck_used"] * sum(truck_used.values()) + w["truck_travel"] * truck_travel)
     solver = cp_model.CpSolver()
-    if params.get("time_limit"):
-        solver.parameters.max_time_in_seconds = params["time_limit"]
     status = solver.Solve(md)
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        print("Calculated time =", time.time() - st_time)
+        calculating_time = time.time() - st_time
+        print("Calculated time =", calculating_time)
         total_makespan = solver.value(total_makespan)
         print("Status :", solver.status_name(status), f"(horizon = {horizon})")
         print("Total Makespan :", total_makespan)
@@ -301,9 +300,9 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
         fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.83, 0.95), frameon=False, fontsize=8)
         fig.tight_layout(rect=(0, 0, 0.83, 1))
         plt.show()
+        return calculating_time
     else:
         print("X")
-    return
 
 def set_horizon(boms, factories, deliveries, params):
 

@@ -180,7 +180,8 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
     md.optimize()
 
     if md.Status == GRB.OPTIMAL:
-        print("Calculated time =", time.time() - st_time)
+        calculating_time = time.time() - st_time
+        print("Calculated time =", calculating_time)
         total_makespan = round(total_makespan.X)
         print("Status :", md.Status, f"(horizon = {horizon})")
         print("Total Makespan :", total_makespan)
@@ -291,6 +292,7 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
         fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.83, 0.95), frameon=False, fontsize=8)
         fig.tight_layout(rect=(0, 0, 0.83, 1))
         plt.show()
+        return calculating_time
     else:
         print("X")
     return
@@ -341,7 +343,7 @@ def start(boms, factories, holding_cost, deliveries, trucks, params):
 
 def main():
 
-    params = {"final_product": ["JT12", "JT9"], "amount": [2, 1], "float_unit": ["JT4", "JT9"],
+    params = {"final_product": ["JT12"], "amount": [1], "float_unit": ["JT4", "JT9"],
               "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}} # 목적함수 가중치
 
     boms = {
