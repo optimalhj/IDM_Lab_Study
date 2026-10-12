@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from ortools.sat.python import cp_model
+import time
 
 def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
     need = {}
@@ -10,15 +11,21 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         need[jt] = need.get(jt, 0) + qty
         for ingredient in boms.get(jt, {}).keys(): explode(ingredient, qty * boms[jt][ingredient])
     for final_product, amount in zip(params["final_product"], params["amount"]): explode(final_product, amount)
-    max_job = {fc: {jt: need.get(jt, 0) // min(ini_set[fc][jt]) + 1 for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
+    max_job = {fc: {jt: -(-need.get(jt, 0) // min(ini_set[fc][jt])) * min(ini_set[fc][jt]) for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
+    qty_ub = {} # qty_ub[jt] : jt 가 시스템 전체에 존재할 수 있는 최대량 (CP-SAT 은 모든 정수 변수에 유한한 범위가 필요)
+    for fc in ini_set.keys():
+        for jt in ini_set[fc].keys():
+            qty_ub[jt] = qty_ub.get(jt, 0) + max_job[fc][jt]
 
-    md = cp_model.CpModel() # CP-SAT 은 정수 변수만 지원 → params["float_unit"] 품목도 정수로 처리
+    md = cp_model.CpModel() # 모든 변수는 정수형 (params["float_unit"] 은 사용하지 않음)
+
+    st_time = time.time()
 
     fc_wip_t, delivering = {}, {} # delivering[보내는 fc][받는 fc][jt][t][lot_unit] : t에 출발하는 lot 수
     for fc in ini_set.keys():
         fc_wip_t[fc] = {}
         for jt in ini_set[fc].keys():
-            fc_wip_t[fc][jt] = {t: md.new_int_var(0, horizon, f"{fc}_{jt}_{t}") if t >= 0 else 0 for t in range(-1, horizon)}
+            fc_wip_t[fc][jt] = {t: md.new_int_var(0, qty_ub[jt], f"{fc}_{jt}_{t}") if t >= 0 else 0 for t in range(-1, horizon)}
 
             for fc_prime in set([fc_prime for fc_prime in ini_set.keys() if fc_prime != fc for jt_prime in ini_set[fc_prime] if jt_prime in boms and jt in boms[jt_prime]]): # 같은 공장 안에서 쓰는 재료는 배송 없이 fc_wip_t 에서 바로 소비
                 if fc not in delivering: delivering[fc] = {}
@@ -28,7 +35,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         for fc_prime in delivering[fc].keys():
             for ingredient in delivering[fc][fc_prime].keys():
                 if ingredient not in fc_wip_t[fc_prime]:
-                    fc_wip_t[fc_prime][ingredient] = {t: md.new_int_var(0, horizon, f"{fc_prime}_{ingredient}_{t}") if t >= 0 else 0 for t in range(-1, horizon)}
+                    fc_wip_t[fc_prime][ingredient] = {t: md.new_int_var(0, qty_ub[ingredient], f"{fc_prime}_{ingredient}_{t}") if t >= 0 else 0 for t in range(-1, horizon)}
 
     sem, intervals = {}, {} # Start End Make => Interval
     produced, consumed = {}, {}
@@ -43,7 +50,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
             process_time = getattr(process, f"{fc}{jt}")
             sem[fc][jt] = {}
             intervals[fc][jt] = {}
-            produced[fc][jt] = {t: md.new_bool_var(f"{fc}_{jt}_{t}_produced") for t in range(horizon)}
+            produced[fc][jt] = {t: md.new_int_var(0, 1, f"{fc}_{jt}_{t}_produced") for t in range(horizon)}
             if jt in boms:
                 consumed[fc][jt] = {ingredient: {t: md.new_int_var(0, boms[jt][ingredient], f"{fc}_{ingredient}_{t}_consumed") for t in range(horizon)} for ingredient in boms[jt].keys()}
 
@@ -52,6 +59,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
                 se_event[fc][jt][k] = {}
                 sem[fc][jt][k] = [md.new_int_var(0, horizon - 1, f"{fc}_{jt}_{k}_st"), md.new_int_var(0, horizon - 1, f"{fc}_{jt}_{k}_ed"), md.new_bool_var(f"{fc}_{jt}_{k}_mk")]
                 intervals[fc][jt][k] = md.new_optional_interval_var(sem[fc][jt][k][0], process_time, sem[fc][jt][k][1], sem[fc][jt][k][2], f"{fc}_{jt}_{k}_make")
+                md.add(sem[fc][jt][k][1] == sem[fc][jt][k][0]).only_enforce_if(sem[fc][jt][k][2].Not())
                 if k:
                     md.add(sem[fc][jt][k - 1][2] >= sem[fc][jt][k][2])
                     md.add(sem[fc][jt][k - 1][1] <= sem[fc][jt][k][0])
@@ -107,7 +115,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
                 depart = sum(cargo[key][(f, g)][t] for g in fcs if g not in (f, o))
                 md.add(waiting[key][f][t] == waiting[key][f][t - 1] + arrive - depart)
 
-    truck_cap = params.get("truck_capacity") or sum(max_job[fc][jt] for fc in delivering for fc_prime in delivering[fc] for jt in delivering[fc][fc_prime]) # None 이면 사실상 무제한
+    truck_cap = sum(max_job[fc][jt] for fc in delivering for fc_prime in delivering[fc] for jt in delivering[fc][fc_prime]) # 용량 무한 : 실을 수 있는 전체 화물량을 big-M 으로 사용 (트럭이 출발해야만 화물이 실림)
     for f, g in arcs:
         for t in range(horizon):
             md.add(sum(cargo[key][(f, g)][t] * key[3] for key in commodities if (f, g) in cargo[key]) <= truck_cap * truck_move[(f, g)][t])
@@ -127,7 +135,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         every_final_product_max_set[final_product] = {}
         for fc in ini_set.keys():
             if final_product in ini_set[fc]:
-                every_final_product_max_set[final_product][fc] = md.new_int_var(0, horizon, f"{fc}_{final_product}_FP")
+                every_final_product_max_set[final_product][fc] = md.new_int_var(0, qty_ub[final_product], f"{fc}_{final_product}_FP")
                 md.add_max_equality(every_final_product_max_set[final_product][fc], fc_wip_t[fc][final_product].values())
         md.add(sum(every_final_product_max_set[final_product].values()) >= amount)
 
@@ -140,14 +148,15 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         md.add(total_makespan <= t).only_enforce_if(before_makespan[t].Not())
 
     held, holding = {}, {}
+    hold_ub = 0
     for fc in fc_wip_t.keys():
         held[fc], holding[fc] = {}, {}
         for wip in fc_wip_t[fc].keys():
-            held[fc][wip] = {t: md.new_int_var(0, horizon, f"{fc}_{wip}_{t}_held") for t in range(horizon)}
+            held[fc][wip] = {t: md.new_int_var(0, qty_ub[wip], f"{fc}_{wip}_{t}_held") for t in range(horizon)}
             for t in range(horizon):
-                md.add(held[fc][wip][t] >= fc_wip_t[fc][wip][t] - horizon * (1 - before_makespan[t]))
+                md.add(held[fc][wip][t] >= fc_wip_t[fc][wip][t]).only_enforce_if(before_makespan[t])
             holding[fc][wip] = holding_cost.get(wip, 0) * sum(held[fc][wip].values())
-    hold_ub = sum(holding_cost.get(wip, 0) * horizon * horizon for fc in fc_wip_t for wip in fc_wip_t[fc])
+            hold_ub += holding_cost.get(wip, 0) * qty_ub[wip] * horizon
 
     held["in-transit"], holding["in-transit"] = {}, {} # 트럭에 실려 이동 중 + 다음 트럭 대기 중인 화물
     for jt in ship_max.keys():
@@ -155,7 +164,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         for t in range(horizon):
             moving = sum(cargo[key][(f, g)][s] * key[3] for key in commodities if key[2] == jt for f, g in cargo[key] for s in range(max(0, t - getattr(deliver, f"{f}{g}") + 1), t + 1))
             parked = sum(waiting[key][f][t] * key[3] for key in commodities if key[2] == jt for f in waiting[key])
-            md.add(held["in-transit"][jt][t] >= moving + parked - ship_max[jt] * (1 - before_makespan[t]))
+            md.add(held["in-transit"][jt][t] >= moving + parked).only_enforce_if(before_makespan[t])
         holding["in-transit"][jt] = holding_cost.get(jt, 0) * sum(held["in-transit"][jt].values())
         hold_ub += holding_cost.get(jt, 0) * ship_max[jt] * horizon
     total_holding = md.new_int_var(0, hold_ub, "total_holding_cost")
@@ -164,9 +173,12 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
     w = params["weights"]
     md.minimize(w["makespan"] * total_makespan + w["holding"] * total_holding + w["truck_used"] * truck_used + w["truck_travel"] * truck_travel)
     solver = cp_model.CpSolver()
+    if params.get("time_limit"):
+        solver.parameters.max_time_in_seconds = params["time_limit"]
     status = solver.Solve(md)
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        print("Calculated time =", time.time() - st_time)
         total_makespan = solver.value(total_makespan)
         print("Status :", solver.status_name(status), f"(horizon = {horizon})")
         print("Total Makespan :", total_makespan)
@@ -207,7 +219,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         virtual_moves = [] # Virtual Truck : 같은 공장 생산품이 상위 job 에 투입된 시점 (내부 이송, 시간 0)
         for f in ini_set.keys():
             for t in range(horizon):
-                if load := {ing: amount for ing in ini_set[f] if (amount := round(sum(solver.value(consumed[f][jt][ing][t]) for jt in consumed[f] if ing in consumed[f][jt])))}:
+                if load := {ing: amount for ing in ini_set[f] if (amount := sum(solver.value(consumed[f][jt][ing][t]) for jt in consumed[f] if ing in consumed[f][jt]))}:
                     virtual_moves.append((f, t, load))
         virtual_moves.sort(key=lambda move: move[1])
         print("vt (Virtual Truck)")
@@ -333,8 +345,8 @@ def start(boms, factories, holding_cost, deliveries, params):
 
 def main():
 
-    params = {"tps": 8, "final_product": ["JT12", "JT9"], "amount": [1, 1], "float_unit": ["JT4", "JT9"],
-              "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}} # 목적함수 가중치
+    params = {"tps": 6, "final_product": ["JT12", "JT9"], "amount": [2, 1], "time_limit": None, # time_limit : 초 단위 제한 (None 이면 최적까지)
+              "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}} # 목적함수 가중치, tps : 트럭 대수 (용량 무한)
 
     boms = {
         "JT4": {
@@ -343,7 +355,7 @@ def main():
         "JT5": {
             "JT1": 3},
         "JT9": {
-            "JT4": 1,
+            "JT4": 3,
             "JT5": 1},
         "JT12": {
             "JT9": 1,
@@ -351,16 +363,16 @@ def main():
 
     factories = {
         "Fc1": {
-            "JT1": {"lots": [3], "time": 1},
-            "JT2": {"lots": [4, 8], "time": 1}},
+            "JT1": {"lots": [1], "time": 1},
+            "JT2": {"lots": [1], "time": 1}},
 
         "Fc2": {
-            "JT1": {"lots": [1, 2, 3, 4], "time": 2},
-            "JT5": {"lots": [1, 2], "time": 2}},
+            "JT1": {"lots": [1], "time": 2},
+            "JT5": {"lots": [1], "time": 2}},
         
         "Fc3": {
-            "JT4": {"lots": [2], "time": 2},
-            "JT5": {"lots": [2], "time": 2},
+            "JT4": {"lots": [1], "time": 2},
+            "JT5": {"lots": [1], "time": 2},
             "JT9": {"lots": [1], "time": 3}},
 
         "Fc4": {

@@ -12,7 +12,7 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
         need[jt] = need.get(jt, 0) + qty
         for ingredient in boms.get(jt, {}).keys(): explode(ingredient, qty * boms[jt][ingredient])
     for final_product, amount in zip(params["final_product"], params["amount"]): explode(final_product, amount)
-    max_job = {fc: {jt: need.get(jt, 0) // min(ini_set[fc][jt]) + 1 for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
+    max_job = {fc: {jt: -(-need.get(jt, 0) // min(ini_set[fc][jt])) * min(ini_set[fc][jt]) for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
 
     env = gp.Env(empty=True)
     env.setParam('OutputFlag', 0)
@@ -256,12 +256,11 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
                     ax_tr.plot(x, y - h / 2, marker="o", markersize=5, color=INK, markeredgecolor="white", zorder=5)
                     ax_tr.text(x, y - h / 2 - 0.08, stop, ha="center", va="bottom", fontsize=7, fontweight="bold", color=INK, zorder=5)
 
-        for f, t, load in virtual_moves: # 이송 시간이 0 이므로 막대 대신 마커 + 라벨
+        for f, t, load in virtual_moves:
             ax_tr.plot(t, n_truck - 0.25, marker="v", markersize=7, color=VIRTUAL)
             ax_tr.text(t, n_truck - 0.1, f"{f}\n" + "\n".join(f"{jt}×{n}" for jt, n in load.items()), ha="center", va="top", fontsize=6, color=VIRTUAL)
         ax_tr.axhline(n_truck - 0.6, color=GRID, linewidth=1)
 
-        # 생산 패널 : 공장별로 배경 띠를 번갈아 깔아 구분
         y_of = {row: y for y, row in enumerate(prod_rows)}
         for i, fc in enumerate(ini_set):
             if i % 2 == 0:
@@ -342,7 +341,7 @@ def start(boms, factories, holding_cost, deliveries, trucks, params):
 
 def main():
 
-    params = {"final_product": ["JT12", "JT9"], "amount": [1, 1], "float_unit": ["JT4", "JT9"],
+    params = {"final_product": ["JT12", "JT9"], "amount": [2, 1], "float_unit": ["JT4", "JT9"],
               "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}} # 목적함수 가중치
 
     boms = {
@@ -360,16 +359,16 @@ def main():
 
     factories = {
         "Fc1": {
-            "JT1": {"lots": [3], "time": 1},
-            "JT2": {"lots": [4, 8], "time": 1}},
+            "JT1": {"lots": [1], "time": 1},
+            "JT2": {"lots": [1], "time": 1}},
 
         "Fc2": {
-            "JT1": {"lots": [1, 2, 3, 4], "time": 2},
-            "JT5": {"lots": [1, 2], "time": 2}},
+            "JT1": {"lots": [1], "time": 2},
+            "JT5": {"lots": [1], "time": 2}},
         
         "Fc3": {
-            "JT4": {"lots": [2], "time": 2},
-            "JT5": {"lots": [2], "time": 2},
+            "JT4": {"lots": [1], "time": 2},
+            "JT5": {"lots": [1], "time": 2},
             "JT9": {"lots": [1], "time": 3}},
 
         "Fc4": {

@@ -12,7 +12,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         need[jt] = need.get(jt, 0) + qty
         for ingredient in boms.get(jt, {}).keys(): explode(ingredient, qty * boms[jt][ingredient])
     for final_product, amount in zip(params["final_product"], params["amount"]): explode(final_product, amount)
-    max_job = {fc: {jt: need.get(jt, 0) // min(ini_set[fc][jt]) + 1 for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
+    max_job = {fc: {jt: -(-need.get(jt, 0) // min(ini_set[fc][jt])) * min(ini_set[fc][jt]) for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
 
     env = gp.Env(empty=True)
     env.setParam('OutputFlag', 0)
@@ -109,7 +109,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
                 depart = gp.quicksum(cargo[key][(f, g)][t] for g in fcs if g not in (f, o))
                 md.addConstr(waiting[key][f][t] == waiting[key][f][t - 1] + arrive - depart)
 
-    truck_cap = params.get("truck_capacity") or sum(max_job[fc][jt] for fc in delivering for fc_prime in delivering[fc] for jt in delivering[fc][fc_prime]) # None 이면 사실상 무제한
+    truck_cap = sum(max_job[fc][jt] for fc in delivering for fc_prime in delivering[fc] for jt in delivering[fc][fc_prime]) # 용량 무한 : 실을 수 있는 전체 화물량을 big-M 으로 사용 (트럭이 출발해야만 화물이 실림)
     for f, g in arcs:
         for t in range(horizon):
             md.addConstr(gp.quicksum(cargo[key][(f, g)][t] * key[3] for key in commodities if (f, g) in cargo[key]) <= truck_cap * truck_move[(f, g)][t])
@@ -335,8 +335,8 @@ def start(boms, factories, holding_cost, deliveries, params):
 
 def main():
 
-    params = {"tps": 8, "final_product": ["JT12", "JT9"], "amount": [1, 1], "float_unit": ["JT4", "JT9"],
-              "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}} # 목적함수 가중치
+    params = {"tps": 6, "final_product": ["JT12", "JT9"], "amount": [2, 1], "float_unit": ["JT4", "JT9"],
+              "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}} # 목적함수 가중치, tps : 트럭 대수 (용량 무한)
 
     boms = {
         "JT4": {
@@ -345,24 +345,24 @@ def main():
         "JT5": {
             "JT1": 3},
         "JT9": {
-            "JT4": 1,
-            "JT5": 3},
+            "JT4": 3,
+            "JT5": 1},
         "JT12": {
             "JT9": 1,
             "JT5": 1}}
 
     factories = {
         "Fc1": {
-            "JT1": {"lots": [3], "time": 1},
-            "JT2": {"lots": [4, 8], "time": 1}},
+            "JT1": {"lots": [1], "time": 1},
+            "JT2": {"lots": [1], "time": 1}},
 
         "Fc2": {
-            "JT1": {"lots": [1, 2, 3, 4], "time": 2},
-            "JT5": {"lots": [1, 2], "time": 2}},
+            "JT1": {"lots": [1], "time": 2},
+            "JT5": {"lots": [1], "time": 2}},
         
         "Fc3": {
-            "JT4": {"lots": [2], "time": 2},
-            "JT5": {"lots": [2], "time": 2},
+            "JT4": {"lots": [1], "time": 2},
+            "JT5": {"lots": [1], "time": 2},
             "JT9": {"lots": [1], "time": 3}},
 
         "Fc4": {
