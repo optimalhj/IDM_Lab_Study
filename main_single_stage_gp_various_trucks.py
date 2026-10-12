@@ -4,6 +4,7 @@ from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 import gurobipy as gp
 from gurobipy import GRB
+import time
 
 def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizon):
     need = {}
@@ -11,13 +12,14 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
         need[jt] = need.get(jt, 0) + qty
         for ingredient in boms.get(jt, {}).keys(): explode(ingredient, qty * boms[jt][ingredient])
     for final_product, amount in zip(params["final_product"], params["amount"]): explode(final_product, amount)
-    max_job = {fc: {jt: -(-need.get(jt, 0) // min(ini_set[fc][jt])) * min(ini_set[fc][jt]) for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
+    max_job = {fc: {jt: need.get(jt, 0) // min(ini_set[fc][jt]) + 1 for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
 
     env = gp.Env(empty=True)
     env.setParam('OutputFlag', 0)
     env.start()
     md = gp.Model(env=env)
 
+    st_time = time.time()
     fc_wip_t, delivering = {}, {}
     for fc in ini_set.keys():
         fc_wip_t[fc] = {}
@@ -178,6 +180,7 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
     md.optimize()
 
     if md.Status == GRB.OPTIMAL:
+        print("Calculated time =", time.time() - st_time)
         total_makespan = round(total_makespan.X)
         print("Status :", md.Status, f"(horizon = {horizon})")
         print("Total Makespan :", total_makespan)

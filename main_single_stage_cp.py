@@ -10,7 +10,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         need[jt] = need.get(jt, 0) + qty
         for ingredient in boms.get(jt, {}).keys(): explode(ingredient, qty * boms[jt][ingredient])
     for final_product, amount in zip(params["final_product"], params["amount"]): explode(final_product, amount)
-    max_job = {fc: {jt: -(-need.get(jt, 0) // min(ini_set[fc][jt])) * min(ini_set[fc][jt]) for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
+    max_job = {fc: {jt: need.get(jt, 0) // min(ini_set[fc][jt]) + 1 for jt in ini_set[fc].keys()} for fc in ini_set.keys()}
 
     md = cp_model.CpModel() # CP-SAT 은 정수 변수만 지원 → params["float_unit"] 품목도 정수로 처리
 
