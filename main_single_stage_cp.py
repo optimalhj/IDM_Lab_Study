@@ -296,6 +296,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon):
         return calculating_time
     else:
         print("X")
+        return 0
 
 
 def set_horizon(boms, factories, deliveries, params):

@@ -2,34 +2,6 @@ import main_single_stage_cp, main_single_stage_gp, main_single_stage_cp_various_
 import random
 from copy import deepcopy
 
-def set_horizon(boms, factories, deliveries, params):
-
-    target = dict(zip(params["final_product"], params["amount"]))
-    producers = {}
-    for fc in factories:
-        for jt in factories[fc]:
-            producers.setdefault(jt, []).append(fc)
-
-    req = {} # 필요 생산량 : 최종 목표량과 상위 제품의 소비량 중 큰 값
-    def need(jt):
-        if jt not in req:
-            req[jt] = max(target.get(jt, 0), sum(need(parent) * boms[parent][jt] for parent in boms if jt in boms[parent]))
-        return req[jt]
-
-    def make_time(jt): # 생산 공장들이 나눠서 need(jt) 개를 만드는 최소 시간 (배송은 lot 단위이므로 공장별 생산량은 최소 lot 의 배수로 내림)
-        t = 0
-        while sum(t // factories[fc][jt]["time"] // min(factories[fc][jt]["lots"]) * min(factories[fc][jt]["lots"]) for fc in producers[jt]) < need(jt): t += 1
-        return t
-
-    finish = {}
-    def finish_time(jt):
-        if jt not in finish:
-            arrive = [finish_time(ing) + max(deliveries[fc1][fc2] if fc1 != fc2 else 0 for fc1 in producers[ing] for fc2 in producers[jt]) for ing in boms.get(jt, {})]
-            finish[jt] = max([0] + arrive) + make_time(jt)
-        return finish[jt]
-
-    return max(finish_time(jt) for jt in target) + 1 # job 종료 시점 <= horizon - 1
-
 class Process:
     def __init__(self): pass
 class Deliver:
@@ -45,20 +17,28 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, comparison_
         for fc2 in deliveries[fc1].keys():
             setattr(deliver, f"{fc1}{fc2}", deliveries[fc1][fc2])
 
-    horizon_info = set_horizon(boms, factories, deliveries, params)
     cp_times, lp_times, cp_various_trucks_times, lp_various_trucks_times = [], [], [], []
-    for idx, (system, times_list) in enumerate(zip((main_single_stage_cp.system, main_single_stage_gp.system, main_single_stage_cp_various_trucks.system, main_single_stage_gp_various_trucks.system), (cp_times, lp_times, cp_various_trucks_times, lp_various_trucks_times))):
-        params_tmp = deepcopy(params)
+    horizon = 1
+    while horizon:
+        calculating_time = 0
+        for idx, (system, times_list) in enumerate(zip((main_single_stage_cp.system, main_single_stage_gp.system, main_single_stage_cp_various_trucks.system, main_single_stage_gp_various_trucks.system), (cp_times, lp_times, cp_various_trucks_times, lp_various_trucks_times))):
+            params_tmp = deepcopy(params)
 
-        if idx in (0, 2):
-            params_tmp.pop("float_unit")
+            if idx in (0, 2):
+                params_tmp.pop("float_unit")
+            if idx in (0, 1):
+                params_tmp["tps"] = len(trucks)
+                calculating_time = system(process, deliver, boms, holding_cost, ini_set, params_tmp, horizon)
+            else:
+                calculating_time = system(process, deliver, boms, holding_cost, ini_set, trucks, params_tmp, horizon)
+            if not calculating_time:
+                break
+            times_list.append(calculating_time)
+        if calculating_time:
+            break
+        horizon += 1
 
-        if idx in (0, 1):
-            params_tmp["tps"] = len(trucks)
-            calculating_time = system(process, deliver, boms, holding_cost, ini_set, params_tmp, horizon_info)
-        else:
-            calculating_time = system(process, deliver, boms, holding_cost, ini_set, trucks, params_tmp, horizon_info)
-        times_list.append(calculating_time)
+
     print("cp :", sum(cp_times) / comparison_num, cp_times)
     print("lp :", sum(lp_times) / comparison_num, lp_times)
     print("var_tr_cp :", sum(cp_various_trucks_times) / comparison_num, cp_various_trucks_times)
