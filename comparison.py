@@ -2,6 +2,47 @@ import main_single_stage_cp, main_single_stage_gp, main_single_stage_cp_various_
 import random
 from copy import deepcopy
 
+def lower_bound(boms, factories, deliveries, params):
+    # 어떤 실행 가능해도 이보다 빨리 끝날 수 없는 makespan 하한 (트럭 / lot / 재료 경합을 무시한 완화)
+    target = dict(zip(params["final_product"], params["amount"]))
+    producers = {}
+    for fc in factories:
+        for jt in factories[fc]:
+            producers.setdefault(jt, []).append(fc)
+
+    # 최종 제품은 "공장별 최대 재고의 합 >= amount" 로만 요구되므로 (같은 1 개가 배송 전후로 두 번 셀 수 있음) 1 개만 확실히 필요
+    # 재료는 상위 job 시작 시 bom 만큼 실제로 소비되므로 그 양은 반드시 생산해야 함
+    req = {}
+    def need(jt):
+        if jt not in req:
+            req[jt] = max(1 if jt in target else 0, sum(need(parent) * boms[parent][jt] for parent in boms if jt in boms[parent]))
+        return req[jt]
+
+    gap = lambda g, fc: 0 if g == fc else deliveries[g][fc] # 같은 공장이면 배송 없이 바로 소비
+
+    ends = {}
+    def end_times(g, jt, k): # g 가 jt 를 k 개 만들 때 각 job 의 최소 종료 시점 (같은 공장 같은 job 은 순차 생산)
+        lst = ends.setdefault((g, jt), [])
+        while len(lst) < k:
+            n = len(lst) + 1
+            ready = max([0] + [avail(ing, n * boms[jt][ing], g) for ing in boms.get(jt, {})]) # n 번째 job 시작 전 재료 n * bom 개 확보
+            lst.append(max(ready, lst[-1] if lst else 0) + factories[g][jt]["time"])
+        return lst[:k]
+
+    def count(jt, q, T, fc=None): # T 까지 fc 에 도착할 수 있는 jt 개수 (fc=None : 어디서든 생산 완료)
+        return sum(sum(e + (gap(g, fc) if fc else 0) <= T for e in end_times(g, jt, q)) for g in producers[jt])
+
+    memo = {}
+    def avail(jt, q, fc=None): # jt 를 q 개 확보할 수 있는 가장 빠른 시점
+        if (jt, q, fc) not in memo:
+            T = 0
+            while count(jt, q, T, fc) < q: T += 1
+            memo[(jt, q, fc)] = T
+        return memo[(jt, q, fc)]
+
+    for jt in producers: need(jt)
+    return max(avail(jt, req[jt]) for jt in producers if req[jt]) # 모든 job 종료 <= makespan
+
 class Process:
     def __init__(self): pass
 class Deliver:
@@ -18,7 +59,7 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, comparison_
             setattr(deliver, f"{fc1}{fc2}", deliveries[fc1][fc2])
 
     cp_times, lp_times, cp_various_trucks_times, lp_various_trucks_times = [], [], [], []
-    horizon = 1
+    horizon = lower_bound(boms, factories, deliveries, params) + 1 # job 종료 시점 <= horizon - 1 이므로 이보다 작은 horizon 은 무조건 infeasible
     while horizon:
         calculating_time = 0
         for idx, (system, times_list) in enumerate(zip((main_single_stage_cp.system, main_single_stage_gp.system, main_single_stage_cp_various_trucks.system, main_single_stage_gp_various_trucks.system), (cp_times, lp_times, cp_various_trucks_times, lp_various_trucks_times))):
