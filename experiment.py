@@ -1,6 +1,7 @@
 import main_single_stage_cp, main_single_stage_gp, main_single_stage_cp_various_trucks, main_single_stage_gp_various_trucks
 import random
 from copy import deepcopy
+import matplotlib.pyplot as plt
 
 def lower_bound(boms, factories, deliveries, params):
     # 어떤 실행 가능해도 이보다 빨리 끝날 수 없는 makespan 하한 (트럭 / lot / 재료 경합을 무시한 완화)
@@ -69,33 +70,45 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, repetition=
             if idx == 1: params_tmp.pop("float_unit")
 
             for _ in range(repetition):
-                calculating_time = system(process, deliver, boms, holding_cost, ini_set, *extra_args, params_tmp, horizon)
+                calculating_time = system(process, deliver, boms, holding_cost, ini_set, *extra_args, params_tmp, horizon, printing=False)
                 if not calculating_time: return False
                 times_list.append(calculating_time)
         return True
 
     stage, horizon = 0, lower_bound(boms, factories, deliveries, params) + 1 # job 종료 시점 <= horizon - 1 이므로 이보다 작은 horizon 은 무조건 infeasible
     while stage < len(stages): # 다음 stage 는 처음부터가 아니라 앞 stage 가 풀린 horizon 부터 이어서 탐색
-        print(horizon)
         if solved(*stages[stage], horizon): stage += 1
         else: horizon += 1
 
-    print("lp :", sum(lp_times) / repetition, lp_times)
-    print("cp :", sum(cp_times) / repetition, cp_times)
-    print("var_tr_lp :", sum(lp_various_trucks_times) / repetition, lp_various_trucks_times)
-    print("var_tr_cp :", sum(cp_various_trucks_times) / repetition, cp_various_trucks_times)
+    return [sum(times) / repetition for times in (lp_times, cp_times, lp_various_trucks_times, cp_various_trucks_times)]
 
 def main():
 
     from experiment_dataset import repetition, datasets
     random.seed(4233)
 
+    graph = {}
     for dataset in datasets:
         params, boms, factories, holding_cost, trucks = dataset["params"], dataset["boms"], dataset["factories"], dataset["holding_cost"], dataset["trucks"]
-    
+        key = f"fc{len(factories)}_tr{len(trucks)}_jt{len(set([jt for fc in factories.keys() for jt in factories[fc]]))}_fp{len(params["final_product"])}({",".join(str(value) for value in params["amount"])})_b{len(boms)}_"
+
         fcs = list(factories)
         deliveries = {fc1: {fc2: random.randint(3, 8) if fc1 != fc2 else 1 for fc2 in fcs} for fc1 in fcs}
-        start(boms, factories, holding_cost, deliveries, trucks, params, repetition)
 
+        result, i = start(boms, factories, holding_cost, deliveries, trucks, params, repetition), 1
+        while True:
+            key_tmp = key + str(i)
+            if key_tmp not in graph:
+                graph[key_tmp] = result
+                break
+            i += 1
+
+    x = list(graph)
+    for idx, system in enumerate(("lp", "cp", "lp_various_trucks", "cp_various_trucks")):
+        plt.plot(x, [graph[key][idx] for key in x], label=system, marker="o", linestyle="--")
+    plt.legend()
+    plt.xlabel("dataset")
+    plt.ylabel("time")
+    plt.show()
 if __name__ =="__main__":
     main()

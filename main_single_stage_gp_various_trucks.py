@@ -6,7 +6,7 @@ import gurobipy as gp
 from gurobipy import GRB
 import time
 
-def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizon):
+def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizon, printing=True):
     need = {}
     def explode(jt, qty):
         need[jt] = need.get(jt, 0) + qty
@@ -181,120 +181,121 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
 
     if md.Status == GRB.OPTIMAL:
         calculating_time = time.time() - st_time
-        print("Calculated time =", calculating_time)
-        total_makespan = round(total_makespan.X)
-        print("Status :", md.Status, f"(horizon = {horizon})")
-        print("Total Makespan :", total_makespan)
-        print("Holding Cost :", total_holding.X)
-        for fc in holding.keys():
-            for wip in holding[fc].keys():
-                if cost := holding[fc][wip].getValue():
-                    print(f"    {fc} {wip} : {cost} (= {holding_cost.get(wip, 0)} x {sum(v.X for v in held[fc][wip].values())} unit*time)")
-        print("Truck Used :", round(sum(u.X for u in truck_used.values())), "/", tps, "(+1 Virtual Truck)")
-        print("Truck Travel :", truck_travel.X, "\n")
+        if printing:
+            print("Calculated time =", calculating_time)
+            total_makespan = round(total_makespan.X)
+            print("Status :", md.Status, f"(horizon = {horizon})")
+            print("Total Makespan :", total_makespan)
+            print("Holding Cost :", total_holding.X)
+            for fc in holding.keys():
+                for wip in holding[fc].keys():
+                    if cost := holding[fc][wip].getValue():
+                        print(f"    {fc} {wip} : {cost} (= {holding_cost.get(wip, 0)} x {sum(v.X for v in held[fc][wip].values())} unit*time)")
+            print("Truck Used :", round(sum(u.X for u in truck_used.values())), "/", tps, "(+1 Virtual Truck)")
+            print("Truck Travel :", truck_travel.X, "\n")
 
-        jobs = [(fc, jt, k, round(sem[fc][jt][k][0].X), round(sem[fc][jt][k][1].X)) for fc in sem.keys() for jt in sem[fc].keys() for k in range(max_job[fc][jt]) if round(sem[fc][jt][k][2].X)]
+            jobs = [(fc, jt, k, round(sem[fc][jt][k][0].X), round(sem[fc][jt][k][1].X)) for fc in sem.keys() for jt in sem[fc].keys() for k in range(max_job[fc][jt]) if round(sem[fc][jt][k][2].X)]
 
-        routes = [] # 사용된 트럭의 경로 : 트럭별 변수에서 그대로 읽음 (moves : (f, g, 출발, 도착, load))
-        for v in trucks:
-            if not round(truck_used[v].X):
-                continue
-            moves = []
-            for t, f, g in sorted((t, f, g) for f, g in arcs for t in range(horizon) if round(truck_move[v][(f, g)][t].X)):
-                load = {} # load[(d, jt)] : 실린 lot 크기 목록
-                for key in sorted(commodities, key=lambda key: -key[3]):
-                    if (f, g) in cargo[key] and (n := round(loaded[key][v][(f, g)][t].X)):
-                        load.setdefault((key[1], key[2]), []).extend([key[3]] * n)
-                moves.append((f, g, t, t + getattr(deliver, f"{f}{g}"), load))
-            routes.append({"name": v, "cap": trucks[v]["cap"], "home": next(f for f in fcs if round(truck_idle[v][f][-1].X)), "moves": moves})
+            routes = [] # 사용된 트럭의 경로 : 트럭별 변수에서 그대로 읽음 (moves : (f, g, 출발, 도착, load))
+            for v in trucks:
+                if not round(truck_used[v].X):
+                    continue
+                moves = []
+                for t, f, g in sorted((t, f, g) for f, g in arcs for t in range(horizon) if round(truck_move[v][(f, g)][t].X)):
+                    load = {} # load[(d, jt)] : 실린 lot 크기 목록
+                    for key in sorted(commodities, key=lambda key: -key[3]):
+                        if (f, g) in cargo[key] and (n := round(loaded[key][v][(f, g)][t].X)):
+                            load.setdefault((key[1], key[2]), []).extend([key[3]] * n)
+                    moves.append((f, g, t, t + getattr(deliver, f"{f}{g}"), load))
+                routes.append({"name": v, "cap": trucks[v]["cap"], "home": next(f for f in fcs if round(truck_idle[v][f][-1].X)), "moves": moves})
 
-        fmt = lambda load: ", ".join(f"{jt}×{sum(lots):g}→{d} [{'+'.join(f'{lot:g}' for lot in lots)}]" for (d, jt), lots in load.items()) or "empty" # [ ] : lot 구성
-        for route in routes:
-            print(f"{route['name']} (cap {route['cap']}, start {route['home']}) : {' → '.join([route['home']] + [move[1] for move in route['moves']])}")
-            for f, g, t, arrive, load in route["moves"]:
-                print(f"    {f} -> {g} | {t} ~ {arrive} ({arrive - t}) | {fmt(load)} | {sum(map(sum, load.values())):g}/{route['cap']}")
+            fmt = lambda load: ", ".join(f"{jt}×{sum(lots):g}→{d} [{'+'.join(f'{lot:g}' for lot in lots)}]" for (d, jt), lots in load.items()) or "empty" # [ ] : lot 구성
+            for route in routes:
+                print(f"{route['name']} (cap {route['cap']}, start {route['home']}) : {' → '.join([route['home']] + [move[1] for move in route['moves']])}")
+                for f, g, t, arrive, load in route["moves"]:
+                    print(f"    {f} -> {g} | {t} ~ {arrive} ({arrive - t}) | {fmt(load)} | {sum(map(sum, load.values())):g}/{route['cap']}")
 
-        virtual_moves = [] # Virtual Truck : 같은 공장 생산품이 상위 job 에 투입된 시점 (내부 이송, 시간 0)
-        for f in ini_set.keys():
-            for t in range(horizon):
-                if load := {ing: amount for ing in ini_set[f] if (amount := round(sum(consumed[f][jt][ing][t].X for jt in consumed[f] if ing in consumed[f][jt])))}:
-                    virtual_moves.append((f, t, load))
-        virtual_moves.sort(key=lambda move: move[1])
-        print("vt (Virtual Truck)")
-        for f, t, load in virtual_moves:
-            print(f"    {f} -> {f} | {t} | {load}")
+            virtual_moves = [] # Virtual Truck : 같은 공장 생산품이 상위 job 에 투입된 시점 (내부 이송, 시간 0)
+            for f in ini_set.keys():
+                for t in range(horizon):
+                    if load := {ing: amount for ing in ini_set[f] if (amount := round(sum(consumed[f][jt][ing][t].X for jt in consumed[f] if ing in consumed[f][jt])))}:
+                        virtual_moves.append((f, t, load))
+            virtual_moves.sort(key=lambda move: move[1])
+            print("vt (Virtual Truck)")
+            for f, t, load in virtual_moves:
+                print(f"    {f} -> {f} | {t} | {load}")
 
-        palette = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
-        INK, MUTED, GRID, BAND, EMPTY, VIRTUAL = "#1f2328", "#6b7280", "#e5e7eb", "#f3f4f6", "#9ca3af", "#7c3aed"
+            palette = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+            INK, MUTED, GRID, BAND, EMPTY, VIRTUAL = "#1f2328", "#6b7280", "#e5e7eb", "#f3f4f6", "#9ca3af", "#7c3aed"
 
-        jt_order = list(dict.fromkeys(jt for fc in ini_set for jt in ini_set[fc]))
-        jt_color = {jt: palette[i % len(palette)] for i, jt in enumerate(jt_order)}
-        text_on = lambda hex_color: INK if sum(int(hex_color[i:i + 2], 16) * w for i, w in ((1, 0.299), (3, 0.587), (5, 0.114))) > 140 else "white" # 막대 밝기에 따라 글자색
-        n_truck = len(routes)
-        truck_rows = [f"{route['name']} ({route['home']}, cap {route['cap']})" for route in routes] + ["vt (virtual)"]
-        prod_rows = [(fc, jt) for fc in ini_set for jt in ini_set[fc]]
-        x_max = max([total_makespan] + [move[3] for route in routes for move in route["moves"]]) + 1
+            jt_order = list(dict.fromkeys(jt for fc in ini_set for jt in ini_set[fc]))
+            jt_color = {jt: palette[i % len(palette)] for i, jt in enumerate(jt_order)}
+            text_on = lambda hex_color: INK if sum(int(hex_color[i:i + 2], 16) * w for i, w in ((1, 0.299), (3, 0.587), (5, 0.114))) > 140 else "white" # 막대 밝기에 따라 글자색
+            n_truck = len(routes)
+            truck_rows = [f"{route['name']} ({route['home']}, cap {route['cap']})" for route in routes] + ["vt (virtual)"]
+            prod_rows = [(fc, jt) for fc in ini_set for jt in ini_set[fc]]
+            x_max = max([total_makespan] + [move[3] for route in routes for move in route["moves"]]) + 1
 
-        fig, (ax_tr, ax_pd) = plt.subplots(2, 1, sharex=True, figsize=(max(14, x_max * 0.45), 1.1 * len(truck_rows) + 0.55 * len(prod_rows) + 2.5), gridspec_kw={"height_ratios": [2 * len(truck_rows) + 1, len(prod_rows) + 1]})
-        h = 0.62
+            fig, (ax_tr, ax_pd) = plt.subplots(2, 1, sharex=True, figsize=(max(14, x_max * 0.45), 1.1 * len(truck_rows) + 0.55 * len(prod_rows) + 2.5), gridspec_kw={"height_ratios": [2 * len(truck_rows) + 1, len(prod_rows) + 1]})
+            h = 0.62
 
-        # 물류 패널 : 트럭 한 줄 = 한 대의 경로, 구간 막대는 실린 품목 비율만큼 색 띠, 막대 위에는 정차 공장
-        for y, route in enumerate(routes):
-            for i, (f, g, depart, arrive, load) in enumerate(route["moves"]):
-                waited = i and depart > route["moves"][i - 1][3]
-                if waited: # 정차 대기
-                    ax_tr.plot([route["moves"][i - 1][3], depart], [y, y], color=MUTED, linestyle=":", linewidth=1.5, zorder=1)
-                if load:
-                    bottom, total = y - h / 2, sum(map(sum, load.values()))
-                    for (d, jt), amount in ((key, sum(lots)) for key, lots in load.items()):
-                        ax_tr.barh(bottom + h * amount / total / 2, arrive - depart, left=depart, height=h * amount / total, color=jt_color[jt], linewidth=0, zorder=2)
-                        bottom += h * amount / total
-                else:
-                    ax_tr.barh(y, arrive - depart, left=depart, height=h, color="white", hatch="////", edgecolor=EMPTY, linewidth=0, zorder=2)
-                ax_tr.barh(y, arrive - depart, left=depart, height=h, fill=False, edgecolor=INK, linewidth=1, zorder=3)
-                ax_tr.text((depart + arrive) / 2, y, fmt(load).replace(", ", "\n"), ha="center", va="center", fontsize=6, color=INK, zorder=4, bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85))
-                for x, stop in ((depart, f), (arrive, g)) if not i or waited else ((arrive, g),):
-                    ax_tr.plot(x, y - h / 2, marker="o", markersize=5, color=INK, markeredgecolor="white", zorder=5)
-                    ax_tr.text(x, y - h / 2 - 0.08, stop, ha="center", va="bottom", fontsize=7, fontweight="bold", color=INK, zorder=5)
+            # 물류 패널 : 트럭 한 줄 = 한 대의 경로, 구간 막대는 실린 품목 비율만큼 색 띠, 막대 위에는 정차 공장
+            for y, route in enumerate(routes):
+                for i, (f, g, depart, arrive, load) in enumerate(route["moves"]):
+                    waited = i and depart > route["moves"][i - 1][3]
+                    if waited: # 정차 대기
+                        ax_tr.plot([route["moves"][i - 1][3], depart], [y, y], color=MUTED, linestyle=":", linewidth=1.5, zorder=1)
+                    if load:
+                        bottom, total = y - h / 2, sum(map(sum, load.values()))
+                        for (d, jt), amount in ((key, sum(lots)) for key, lots in load.items()):
+                            ax_tr.barh(bottom + h * amount / total / 2, arrive - depart, left=depart, height=h * amount / total, color=jt_color[jt], linewidth=0, zorder=2)
+                            bottom += h * amount / total
+                    else:
+                        ax_tr.barh(y, arrive - depart, left=depart, height=h, color="white", hatch="////", edgecolor=EMPTY, linewidth=0, zorder=2)
+                    ax_tr.barh(y, arrive - depart, left=depart, height=h, fill=False, edgecolor=INK, linewidth=1, zorder=3)
+                    ax_tr.text((depart + arrive) / 2, y, fmt(load).replace(", ", "\n"), ha="center", va="center", fontsize=6, color=INK, zorder=4, bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85))
+                    for x, stop in ((depart, f), (arrive, g)) if not i or waited else ((arrive, g),):
+                        ax_tr.plot(x, y - h / 2, marker="o", markersize=5, color=INK, markeredgecolor="white", zorder=5)
+                        ax_tr.text(x, y - h / 2 - 0.08, stop, ha="center", va="bottom", fontsize=7, fontweight="bold", color=INK, zorder=5)
 
-        for f, t, load in virtual_moves:
-            ax_tr.plot(t, n_truck - 0.25, marker="v", markersize=7, color=VIRTUAL)
-            ax_tr.text(t, n_truck - 0.1, f"{f}\n" + "\n".join(f"{jt}×{n}" for jt, n in load.items()), ha="center", va="top", fontsize=6, color=VIRTUAL)
-        ax_tr.axhline(n_truck - 0.6, color=GRID, linewidth=1)
+            for f, t, load in virtual_moves:
+                ax_tr.plot(t, n_truck - 0.25, marker="v", markersize=7, color=VIRTUAL)
+                ax_tr.text(t, n_truck - 0.1, f"{f}\n" + "\n".join(f"{jt}×{n}" for jt, n in load.items()), ha="center", va="top", fontsize=6, color=VIRTUAL)
+            ax_tr.axhline(n_truck - 0.6, color=GRID, linewidth=1)
 
-        y_of = {row: y for y, row in enumerate(prod_rows)}
-        for i, fc in enumerate(ini_set):
-            if i % 2 == 0:
-                ax_pd.axhspan(y_of[(fc, list(ini_set[fc])[0])] - 0.5, y_of[(fc, list(ini_set[fc])[-1])] + 0.5, color=BAND, zorder=0)
-        for fc, jt, k, st, ed in jobs:
-            ax_pd.barh(y_of[(fc, jt)], ed - st, left=st, height=0.75, color=jt_color[jt], edgecolor="white", linewidth=1.5, zorder=2)
-            ax_pd.text((st + ed) / 2, y_of[(fc, jt)], f"{k}_th\n({ed - st})", ha="center", va="center", fontsize=5, color=text_on(jt_color[jt]), zorder=3)
+            y_of = {row: y for y, row in enumerate(prod_rows)}
+            for i, fc in enumerate(ini_set):
+                if i % 2 == 0:
+                    ax_pd.axhspan(y_of[(fc, list(ini_set[fc])[0])] - 0.5, y_of[(fc, list(ini_set[fc])[-1])] + 0.5, color=BAND, zorder=0)
+            for fc, jt, k, st, ed in jobs:
+                ax_pd.barh(y_of[(fc, jt)], ed - st, left=st, height=0.75, color=jt_color[jt], edgecolor="white", linewidth=1.5, zorder=2)
+                ax_pd.text((st + ed) / 2, y_of[(fc, jt)], f"{k}_th\n({ed - st})", ha="center", va="center", fontsize=5, color=text_on(jt_color[jt]), zorder=3)
 
-        for ax, rows, title in ((ax_tr, truck_rows, f"Logistics  (VRP routes, trucks used {n_truck} / {tps} + 1 virtual)"), (ax_pd, [f"{fc} · {jt}" for fc, jt in prod_rows], "Production")):
-            ax.axvline(total_makespan, color=INK, linestyle="--", linewidth=1, zorder=1)
-            ax.set_yticks(range(len(rows)), rows)
-            ax.set_ylim(len(rows) - 0.4, -0.9)
-            ax.set_title(title, loc="left", color=INK, fontsize=10)
-            ax.grid(axis="x", color=GRID, linewidth=0.8)
-            ax.set_axisbelow(True)
-            for side in ("top", "right", "left"):
-                ax.spines[side].set_visible(False)
-            ax.tick_params(colors=MUTED, length=0)
-        ax_tr.text(total_makespan, -0.75, f"makespan = {total_makespan} ", ha="right", va="center", fontsize=8, color=INK)
-        ax_pd.set_xlim(-1, x_max)
-        ax_pd.set_xlabel("Time", color=MUTED)
+            for ax, rows, title in ((ax_tr, truck_rows, f"Logistics  (VRP routes, trucks used {n_truck} / {tps} + 1 virtual)"), (ax_pd, [f"{fc} · {jt}" for fc, jt in prod_rows], "Production")):
+                ax.axvline(total_makespan, color=INK, linestyle="--", linewidth=1, zorder=1)
+                ax.set_yticks(range(len(rows)), rows)
+                ax.set_ylim(len(rows) - 0.4, -0.9)
+                ax.set_title(title, loc="left", color=INK, fontsize=10)
+                ax.grid(axis="x", color=GRID, linewidth=0.8)
+                ax.set_axisbelow(True)
+                for side in ("top", "right", "left"):
+                    ax.spines[side].set_visible(False)
+                ax.tick_params(colors=MUTED, length=0)
+            ax_tr.text(total_makespan, -0.75, f"makespan = {total_makespan} ", ha="right", va="center", fontsize=8, color=INK)
+            ax_pd.set_xlim(-1, x_max)
+            ax_pd.set_xlabel("Time", color=MUTED)
 
-        handles = [Patch(color=jt_color[jt], label=jt) for jt in jt_order]
-        handles += [Patch(facecolor="white", edgecolor=EMPTY, hatch="////", label="truck: empty move"),
-                    Line2D([], [], color=MUTED, linestyle=":", linewidth=1.5, label="truck: waiting at stop"),
-                    Line2D([], [], color=INK, marker="o", linestyle="", markersize=5, label="stop (factory)"),
-                    Line2D([], [], color=VIRTUAL, marker="v", linestyle="", markersize=7, label="virtual truck: internal move")]
-        fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.83, 0.95), frameon=False, fontsize=8)
-        fig.tight_layout(rect=(0, 0, 0.83, 1))
-        plt.show()
+            handles = [Patch(color=jt_color[jt], label=jt) for jt in jt_order]
+            handles += [Patch(facecolor="white", edgecolor=EMPTY, hatch="////", label="truck: empty move"),
+                        Line2D([], [], color=MUTED, linestyle=":", linewidth=1.5, label="truck: waiting at stop"),
+                        Line2D([], [], color=INK, marker="o", linestyle="", markersize=5, label="stop (factory)"),
+                        Line2D([], [], color=VIRTUAL, marker="v", linestyle="", markersize=7, label="virtual truck: internal move")]
+            fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.83, 0.95), frameon=False, fontsize=8)
+            fig.tight_layout(rect=(0, 0, 0.83, 1))
+            plt.show()
         return calculating_time
     else:
-        print("X")
+        if printing: print("X")
         return 0
 
 def set_horizon(boms, factories, deliveries, params):
