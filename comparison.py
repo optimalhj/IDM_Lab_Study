@@ -62,16 +62,25 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, comparison_
     horizon = lower_bound(boms, factories, deliveries, params) + 1 # job 종료 시점 <= horizon - 1 이므로 이보다 작은 horizon 은 무조건 infeasible
     while horizon:
         calculating_time = 0
-        for idx, (system, times_list) in enumerate(zip((main_single_stage_cp.system, main_single_stage_gp.system, main_single_stage_cp_various_trucks.system, main_single_stage_gp_various_trucks.system), (cp_times, lp_times, cp_various_trucks_times, lp_various_trucks_times))):
+        for idx, (system, times_list) in enumerate(zip((main_single_stage_gp.system, main_single_stage_cp.system), (cp_times, lp_times))):
             params_tmp = deepcopy(params)
+            if idx == 1: params_tmp.pop("float_unit")
 
-            if idx in (0, 2):
-                params_tmp.pop("float_unit")
-            if idx in (0, 1):
-                params_tmp["tps"] = len(trucks)
-                calculating_time = system(process, deliver, boms, holding_cost, ini_set, params_tmp, horizon)
-            else:
-                calculating_time = system(process, deliver, boms, holding_cost, ini_set, trucks, params_tmp, horizon)
+            params_tmp["tps"] = len(trucks)
+            calculating_time = system(process, deliver, boms, holding_cost, ini_set, params_tmp, horizon)
+
+            if not calculating_time:
+                break
+            times_list.append(calculating_time)
+        if calculating_time:
+            break
+        horizon += 1
+    while horizon:
+        calculating_time = 0
+        for idx, (system, times_list) in enumerate(zip((main_single_stage_gp_various_trucks.system, main_single_stage_cp_various_trucks.system), (cp_various_trucks_times, lp_various_trucks_times))):
+            params_tmp = deepcopy(params)
+            if idx == 1: params_tmp.pop("float_unit")
+            calculating_time = system(process, deliver, boms, holding_cost, ini_set, trucks, params_tmp, horizon)
             if not calculating_time:
                 break
             times_list.append(calculating_time)
@@ -79,14 +88,13 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, comparison_
             break
         horizon += 1
 
-
     print("cp :", sum(cp_times) / comparison_num, cp_times)
     print("lp :", sum(lp_times) / comparison_num, lp_times)
     print("var_tr_cp :", sum(cp_various_trucks_times) / comparison_num, cp_various_trucks_times)
     print("var_tr_lp :", sum(lp_various_trucks_times) / comparison_num, lp_various_trucks_times)
 def main():
     params = {"final_product":["JT12"], "amount": [1], "float_unit": ["JT4", "JT9"],
-              "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}}  # 목적함수 가중치
+              "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}}
 
     boms = {
         "JT4": {
