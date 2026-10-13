@@ -19,7 +19,7 @@ datasets = [
                 "JT4": {"lots": [1], "time": 2}}},
         "holding_cost": {"JT4": 2, "JT8": 2, "JT10": 7},
         "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 5}, "tr3": {"cap": 5}}},
-    ---------------- case 2 : Factory 3, JT 3, Truck 3 ----------------
+    # ---------------- case 2 : Factory 3, JT 3, Truck 3 ----------------
     {
         "params": {"final_product": ["JT14"], "amount": [1], "float_unit": [],
                    "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
@@ -874,4 +874,4 @@ datasets = [
                 "JT4": {"lots": [1, 3], "time": 2}}},
         "holding_cost": {"JT2": 2, "JT3": 2, "JT4": 1, "JT9": 2, "JT10": 4, "JT11": 10, "JT12": 5, "JT13": 12, "JT14": 22, "JT15": 9},
         "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 8}, "tr3": {"cap": 5}, "tr4": {"cap": 5}, "tr5": {"cap": 3}, "tr6": {"cap": 3}, "tr7": {"cap": 3}}},
-]
+    ]
