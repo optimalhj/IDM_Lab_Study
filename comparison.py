@@ -64,7 +64,7 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, comparison_
     print("var_tr_cp :", sum(cp_various_trucks_times) / comparison_num, cp_various_trucks_times)
     print("var_tr_lp :", sum(lp_various_trucks_times) / comparison_num, lp_various_trucks_times)
 def main():
-    params = {"final_product": ["JT12"], "amount": [1], "float_unit": ["JT4", "JT9"],
+    params = {"final_product":["JT12"], "amount": [1], "float_unit": ["JT4", "JT9"],
               "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}}  # 목적함수 가중치
 
     boms = {
