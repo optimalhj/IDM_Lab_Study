@@ -1,5 +1,6 @@
 import main_single_stage_cp, main_single_stage_gp, main_single_stage_cp_various_trucks, main_single_stage_gp_various_trucks
 import random
+import os
 from copy import deepcopy
 import matplotlib.pyplot as plt
 import mysql.connector
@@ -46,34 +47,55 @@ def lower_bound(boms, factories, deliveries, params):
     for jt in producers: need(jt)
     return max(avail(jt, req[jt]) for jt in producers if req[jt]) # 모든 job 종료 <= makespan
 
-def mysql_initialize():
+def mysql_initialize(): # DB 를 새로 만들고 계산 시간 기록 테이블 생성
     conn = mysql.connector.connect(user=user, password=password)
     cursor = conn.cursor()
-    cursor.execute(f"DROP DATABASE IF EXISTS {db_name};")
-    cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name};")
+    cursor.execute(f"DROP DATABASE IF EXISTS `{db_name}`;")
+    cursor.execute(f"CREATE DATABASE `{db_name}`;")
     cursor.execute(f"""
-        CREATE TABLE {table_time_record}(
-        DATASET varchar(30) NOT NULL PRIMARY KEY);
-        TIME float""")
+        CREATE TABLE `{db_name}`.`{table_time_record}`(
+        DATASET varchar(64) NOT NULL PRIMARY KEY,
+        TIME float NOT NULL);""")
+    conn.commit()
     cursor.close()
 
-def mysql_record(key, calculating_time):
+def mysql_record(key, calculating_time, info, field="wip"): # key 의 계산 시간 기록 + key 테이블 (행 : 시간, 열 : 공장_JT, 값 : field 수량) 생성
     conn = mysql.connector.connect(user=user, password=password, database=db_name)
     cursor = conn.cursor()
+    cursor.execute(f"INSERT INTO `{table_time_record}` VALUES (%s, %s);", (key, calculating_time))
 
-    cursor.execute(f"""
-        INSERT INTO {table_time_record} VALUES (\"{key}\", {calculating_time});""")
+    # info : system 반환 dict
+    #   "makespan" (int), "holding_cost" / "truck_used" / "truck_travel" (int | float)
+    #   "jobs", "in_transit", "trucks", "truck_log", "virtual_moves" (list[dict])
+    #   "factory" (list[dict]) : [{"t": int, "fc": str, "jt": str, "wip", "produced", "consumed", "sent", "received": int | float}, ...]
+    #       t -> fc -> jt 순서로 모든 (t, fc, jt) 조합이 한 행씩 존재
+    table = {} # table[t][(fc, jt)] = 수량
+    for row in info["factory"]:
+        if row["t"] not in table: table[row["t"]] = {}
+        table[row["t"]][(row["fc"], row["jt"])] = row[field]
 
-    cursor.execute(f"""
-        CREATE TABLE {key}(
-        DATASET varchar(30) NOT NULL PRIMARY KEY);
-        TIME float""")
+    cols = list(table[0].keys()) # 열 : t = 0 의 (fc, jt) 순서
+    key_wip = key + "wip"
+    cursor.execute(f"DROP TABLE IF EXISTS `{key_wip}`;")
+    col_defs = "t int NOT NULL PRIMARY KEY"
+    for fc, jt in cols:
+        col_defs += f", `{fc}_{jt}` float NOT NULL"
+    cursor.execute(f"CREATE TABLE `{key_wip}`({col_defs});")
+
+    placeholders = ", ".join(["%s"] * (len(cols) + 1)) # t + 공장_JT 열
+    for t in sorted(table.keys()):
+        values = [t]
+        for fc, jt in cols:
+            values.append(table[t][(fc, jt)])
+        cursor.execute(f"INSERT INTO `{key_wip}` VALUES ({placeholders});", values)
+    conn.commit()
+    cursor.close()
 
 class Process:
     def __init__(self): pass
 class Deliver:
     def __init__(self): pass
-def start(boms, factories, holding_cost, deliveries, trucks, params, printing, repetition=1):
+def start(boms, factories, holding_cost, deliveries, trucks, params, printing, saving, key, gantt_dir, repetition=1): # key : mysql 기록 / 간트차트 파일용 dataset 이름
     process, deliver, ini_set = Process(), Deliver(), {}
     for fc in factories.keys():
         ini_set[fc] = {}
@@ -85,19 +107,24 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, printing, r
             setattr(deliver, f"{fc1}{fc2}", deliveries[fc1][fc2])
 
     cp_times, lp_times, cp_various_trucks_times, lp_various_trucks_times = [], [], [], []
-    stages = [ # ((gp, cp) 모델, (gp, cp) 결과, system 추가 인자, params 추가 항목)
-        ((main_single_stage_gp.system, main_single_stage_cp.system), (lp_times, cp_times), (), {"tps": len(trucks)}),
-        ((main_single_stage_gp_various_trucks.system, main_single_stage_cp_various_trucks.system), (lp_various_trucks_times, cp_various_trucks_times), (trucks,), {})]
+    stages = [ # ((gp, cp) 모델, (gp, cp) 결과, (gp, cp) 이름, system 추가 인자, params 추가 항목)
+        ((main_single_stage_gp.system, main_single_stage_cp.system), (lp_times, cp_times), ("lp", "cp"), (), {"tps": len(trucks)}),
+        ((main_single_stage_gp_various_trucks.system, main_single_stage_cp_various_trucks.system), (lp_various_trucks_times, cp_various_trucks_times), ("lp_various_trucks", "cp_various_trucks"), (trucks,), {})]
 
-    def solved(systems, times_lists, extra_args, extra_params, horizon): # 모든 모델이 horizon 에서 repetition 번 모두 풀리면 True
-        for idx, (system, times_list) in enumerate(zip(systems, times_lists)):
+    def solved(systems, times_lists, names, extra_args, extra_params, horizon): # 모든 모델이 horizon 에서 repetition 번 모두 풀리면 True
+        records = [] # stage 전체가 풀린 경우에만 결과 반영 (실패한 horizon 의 시간은 버림)
+        for idx, (system, name) in enumerate(zip(systems, names)):
             params_tmp = {**deepcopy(params), **extra_params}
             if idx == 1: params_tmp.pop("float_unit")
 
-            for _ in range(repetition):
-                calculating_time, info = system(process, deliver, boms, holding_cost, ini_set, *extra_args, params_tmp, horizon, printing=printing)
+            for rep in range(1, repetition + 1):
+                calculating_time, info = system(process, deliver, boms, holding_cost, ini_set, *extra_args, params_tmp, horizon, printing, saving, os.path.join(gantt_dir, f"{name}_{key}_{rep}.png"))
                 if not calculating_time: return False
-                times_list.append(calculating_time)
+                records.append((idx, f"{name}_{key}_{rep}", calculating_time, info))
+
+        for idx, record_key, calculating_time, info in records:
+            times_lists[idx].append(calculating_time)
+            mysql_record(record_key, calculating_time, info)
         return True
 
     stage, horizon = 0, lower_bound(boms, factories, deliveries, params) + 1 # job 종료 시점 <= horizon - 1 이므로 이보다 작은 horizon 은 무조건 infeasible
@@ -111,7 +138,10 @@ def main():
 
     from experiment_dataset import repetition, datasets
     random.seed(4233)
-    printing = False
+    printing, saving = False, True
+    gantt_dir = "reuslts_gantt_charts"
+    if saving: os.makedirs(gantt_dir, exist_ok=True)
+    mysql_initialize()
 
     graph = {}
     for dataset in datasets:
@@ -121,14 +151,11 @@ def main():
         fcs = list(factories)
         deliveries = {fc1: {fc2: random.randint(3, 8) if fc1 != fc2 else 1 for fc2 in fcs} for fc1 in fcs}
 
-        result, i = start(boms, factories, holding_cost, deliveries, trucks, params, printing, repetition), 1
-        while True:
-            key_tmp = key + str(i)
-            if key_tmp not in graph:
-                print(key_tmp)
-                graph[key_tmp] = result
-                break
-            i += 1
+        i = 1
+        while key + str(i) in graph: i += 1
+        key_tmp = key + str(i)
+        print(key_tmp)
+        graph[key_tmp] = start(boms, factories, holding_cost, deliveries, trucks, params, printing, saving, key_tmp, gantt_dir, repetition)
         print()
 
     x = list(graph)

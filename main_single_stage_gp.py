@@ -6,7 +6,7 @@ import gurobipy as gp
 from gurobipy import GRB
 import time
 
-def system(process, deliver, boms, holding_cost, ini_set, params, horizon, printing=True): # 반환 : (계산 시간, 결과 dict), printing : 결과 출력 / 그래프 여부
+def system(process, deliver, boms, holding_cost, ini_set, params, horizon, printing=True, saving=False, save_path="gantt.png"): # 반환 : (계산 시간, 결과 dict), printing : 결과 출력 / 그래프 표시, saving : 그래프를 save_path 에 저장
     need = {}
     def explode(jt, qty):
         need[jt] = need.get(jt, 0) + qty
@@ -227,6 +227,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon, print
                   "factory": factory_log, "in_transit": transit_log, "trucks": truck_routes, "truck_log": truck_log,
                   "virtual_moves": [{"fc": f, "t": t, "load": load} for f, t, load in virtual_moves]}
 
+        fmt = lambda load: ", ".join(f"{jt}×{sum(lots):g}→{d} [{'+'.join(f'{lot:g}' for lot in lots)}]" for (d, jt), lots in load.items()) or "empty" # [ ] : lot 구성
         if printing:
             print("Calculated time =", calculating_time)
             print("Status :", md.Status, f"(horizon = {horizon})")
@@ -239,7 +240,6 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon, print
             print("Truck Used :", truck_used.X, "/", tps, "(+1 Virtual Truck)")
             print("Truck Travel :", truck_travel.X)
 
-            fmt = lambda load: ", ".join(f"{jt}×{sum(lots):g}→{d} [{'+'.join(f'{lot:g}' for lot in lots)}]" for (d, jt), lots in load.items()) or "empty" # [ ] : lot 구성
             for i, truck in enumerate(trucks):
                 print(f"    tr{i + 1} (start {truck['home']}) : {' → '.join([truck['home']] + [move[1] for move in truck['moves']])}")
                 for f, g, t, arrive, load in truck["moves"]:
@@ -249,6 +249,7 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon, print
             for f, t, load in virtual_moves:
                 print(f"        {f} -> {f} | {t} | {load}")
 
+        if printing or saving: # 간트차트 구성
             palette = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
             INK, MUTED, GRID, BAND, EMPTY, VIRTUAL = "#1f2328", "#6b7280", "#e5e7eb", "#f3f4f6", "#9ca3af", "#7c3aed"
 
@@ -317,7 +318,9 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon, print
                         Line2D([], [], color=VIRTUAL, marker="v", linestyle="", markersize=7, label="virtual truck: internal move")]
             fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.83, 0.95), frameon=False, fontsize=8)
             fig.tight_layout(rect=(0, 0, 0.83, 1))
-            plt.show()
+            if saving: fig.savefig(save_path, dpi=150, bbox_inches="tight")
+            if printing: plt.show()
+            plt.close(fig)
         return calculating_time, result
     else:
         if printing: print("X")
