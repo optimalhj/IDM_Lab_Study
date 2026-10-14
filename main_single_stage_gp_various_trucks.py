@@ -229,8 +229,7 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
                 else:
                     at = ([move["to"] for move in route["moves"] if move["arrive"] <= t] or [route["home"]])[-1]
                     truck_log.append({"t": t, "truck": route["name"], "state": "idle", "from": at, "to": at, "load": []})
-        result = {"status": md.Status, "horizon": horizon, "calculating_time": calculating_time,
-                  "makespan": total_makespan, "holding_cost": val(total_holding), "truck_used": round(sum(u.X for u in truck_used.values())), "truck_travel": val(truck_travel),
+        result = {"makespan": total_makespan, "holding_cost": val(total_holding), "truck_used": round(sum(u.X for u in truck_used.values())), "truck_travel": val(truck_travel),
                   "jobs": [{"fc": fc, "jt": jt, "k": k, "start": st, "end": ed} for fc, jt, k, st, ed in jobs],
                   "factory": factory_log, "in_transit": transit_log, "trucks": truck_routes, "truck_log": truck_log,
                   "virtual_moves": [{"fc": f, "t": t, "load": load} for f, t, load in virtual_moves]}

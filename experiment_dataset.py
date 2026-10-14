@@ -19,172 +19,172 @@ datasets = [
                 "JT4": {"lots": [1], "time": 2}}},
         "holding_cost": {"JT4": 2, "JT8": 2, "JT10": 7},
         "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 5}, "tr3": {"cap": 5}}},
-    # ---------------- case 2 : Factory 3, JT 3, Truck 3 ----------------
-    {
-        "params": {"final_product": ["JT14"], "amount": [1], "float_unit": [],
-                   "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
-        "boms": {
-            "JT14": {"JT3": 1, "JT12": 2}},
-        "factories": {
-            "Fc1": {
-                "JT12": {"lots": [1], "time": 1}},
-            "Fc2": {
-                "JT3": {"lots": [1], "time": 2}},
-            "Fc3": {
-                "JT3": {"lots": [1], "time": 2},
-                "JT14": {"lots": [1], "time": 2}}},
-        "holding_cost": {"JT3": 1, "JT12": 2, "JT14": 4},
-        "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 8}, "tr3": {"cap": 5}}},
-    # ---------------- case 3 : Factory 3, JT 3, Truck 2 ----------------
-    {
-        "params": {"final_product": ["JT15"], "amount": [1], "float_unit": [],
-                   "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
-        "boms": {
-            "JT15": {"JT8": 2, "JT11": 2}},
-        "factories": {
-            "Fc1": {
-                "JT8": {"lots": [1], "time": 2}},
-            "Fc2": {
-                "JT15": {"lots": [1], "time": 3}},
-            "Fc3": {
-                "JT11": {"lots": [1], "time": 1}}},
-        "holding_cost": {"JT8": 2, "JT11": 1, "JT15": 4},
-        "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 10}}},
-    # ---------------- case 4 : Factory 3, JT 4, Truck 2 ----------------
-    {
-        "params": {"final_product": ["JT14"], "amount": [1], "float_unit": ["JT14"],
-                   "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
-        "boms": {
-            "JT11": {"JT9": 1},
-            "JT14": {"JT3": 2, "JT11": 1}},
-        "factories": {
-            "Fc1": {
-                "JT3": {"lots": [1], "time": 2}},
-            "Fc2": {
-                "JT11": {"lots": [1, 3], "time": 3}},
-            "Fc3": {
-                "JT9": {"lots": [1], "time": 2},
-                "JT14": {"lots": [1], "time": 3}}},
-        "holding_cost": {"JT3": 2, "JT9": 2, "JT11": 2, "JT14": 5},
-        "trucks": {"tr1": {"cap": 8}, "tr2": {"cap": 5}}},
-    # ---------------- case 5 : Factory 4, JT 4, Truck 3 ----------------
-    {
-        "params": {"final_product": ["JT12"], "amount": [1], "float_unit": ["JT12"],
-                   "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
-        "boms": {
-            "JT10": {"JT2": 1, "JT8": 1},
-            "JT12": {"JT8": 2, "JT10": 1}},
-        "factories": {
-            "Fc1": {
-                "JT2": {"lots": [1], "time": 2}},
-            "Fc2": {
-                "JT8": {"lots": [1], "time": 2}},
-            "Fc3": {
-                "JT10": {"lots": [1], "time": 2}},
-            "Fc4": {
-                "JT12": {"lots": [1], "time": 4}}},
-        "holding_cost": {"JT2": 1, "JT8": 2, "JT10": 6, "JT12": 11},
-        "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 10}, "tr3": {"cap": 8}}},
-    # ---------------- case 6 : Factory 4, JT 4, Truck 4 ----------------
-    {
-        "params": {"final_product": ["JT10"], "amount": [1], "float_unit": ["JT5"],
-                   "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
-        "boms": {
-            "JT6": {"JT4": 1},
-            "JT10": {"JT5": 1, "JT6": 2}},
-        "factories": {
-            "Fc1": {
-                "JT4": {"lots": [1], "time": 1}},
-            "Fc2": {
-                "JT10": {"lots": [1], "time": 3}},
-            "Fc3": {
-                "JT5": {"lots": [1], "time": 2}},
-            "Fc4": {
-                "JT6": {"lots": [1, 2], "time": 2}}},
-        "holding_cost": {"JT4": 2, "JT5": 1, "JT6": 3, "JT10": 4},
-        "trucks": {"tr1": {"cap": 8}, "tr2": {"cap": 8}, "tr3": {"cap": 8}, "tr4": {"cap": 3}}},
-    # ---------------- case 7 : Factory 4, JT 4, Truck 4 ----------------
-    {
-        "params": {"final_product": ["JT15"], "amount": [1], "float_unit": ["JT3"],
-                   "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
-        "boms": {
-            "JT8": {"JT2": 2, "JT3": 2},
-            "JT15": {"JT3": 1, "JT8": 1}},
-        "factories": {
-            "Fc1": {
-                "JT3": {"lots": [1], "time": 2}},
-            "Fc2": {
-                "JT8": {"lots": [1], "time": 2}},
-            "Fc3": {
-                "JT15": {"lots": [1], "time": 4}},
-            "Fc4": {
-                "JT2": {"lots": [1, 3], "time": 2}}},
-        "holding_cost": {"JT2": 1, "JT3": 1, "JT8": 3, "JT15": 4},
-        "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 8}, "tr3": {"cap": 5}, "tr4": {"cap": 3}}},
-    # ---------------- case 8 : Factory 4, JT 5, Truck 4 ----------------
-    {
-        "params": {"final_product": ["JT7", "JT10"], "amount": [1, 1], "float_unit": [],
-                   "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
-        "boms": {
-            "JT5": {"JT3": 1},
-            "JT7": {"JT2": 1},
-            "JT10": {"JT3": 2, "JT5": 1}},
-        "factories": {
-            "Fc1": {
-                "JT10": {"lots": [1], "time": 4}},
-            "Fc2": {
-                "JT5": {"lots": [1], "time": 2}},
-            "Fc3": {
-                "JT3": {"lots": [1], "time": 1}},
-            "Fc4": {
-                "JT2": {"lots": [1], "time": 2},
-                "JT7": {"lots": [1], "time": 3}}},
-        "holding_cost": {"JT2": 1, "JT3": 1, "JT5": 2, "JT7": 2, "JT10": 5},
-        "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 8}, "tr3": {"cap": 5}, "tr4": {"cap": 3}}},
-    # ---------------- case 9 : Factory 4, JT 5, Truck 4 ----------------
-    {
-        "params": {"final_product": ["JT14", "JT15"], "amount": [1, 1], "float_unit": [],
-                   "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
-        "boms": {
-            "JT8": {"JT2": 1, "JT3": 1},
-            "JT14": {"JT2": 2, "JT3": 2, "JT8": 1},
-            "JT15": {"JT8": 1}},
-        "factories": {
-            "Fc1": {
-                "JT2": {"lots": [1, 2], "time": 2},
-                "JT14": {"lots": [1], "time": 4},
-                "JT15": {"lots": [1], "time": 4}},
-            "Fc2": {
-                "JT8": {"lots": [1], "time": 3},
-                "JT15": {"lots": [1], "time": 3}},
-            "Fc3": {
-                "JT2": {"lots": [1], "time": 1}},
-            "Fc4": {
-                "JT3": {"lots": [1], "time": 1},
-                "JT15": {"lots": [1], "time": 4}}},
-        "holding_cost": {"JT2": 2, "JT3": 1, "JT8": 6, "JT14": 11, "JT15": 9},
-        "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 8}, "tr3": {"cap": 5}, "tr4": {"cap": 5}}},
-    # ---------------- case 10 : Factory 4, JT 5, Truck 4 ----------------
-    {
-        "params": {"final_product": ["JT8", "JT13"], "amount": [2, 2], "float_unit": [],
-                   "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
-        "boms": {
-            "JT7": {"JT5": 1},
-            "JT8": {"JT3": 1, "JT7": 1},
-            "JT13": {"JT5": 2, "JT7": 1}},
-        "factories": {
-            "Fc1": {
-                "JT5": {"lots": [1], "time": 1},
-                "JT8": {"lots": [1], "time": 3}},
-            "Fc2": {
-                "JT3": {"lots": [1], "time": 2}},
-            "Fc3": {
-                "JT13": {"lots": [1], "time": 4}},
-            "Fc4": {
-                "JT5": {"lots": [1, 2], "time": 1},
-                "JT7": {"lots": [1], "time": 3}}},
-        "holding_cost": {"JT3": 2, "JT5": 2, "JT7": 3, "JT8": 7, "JT13": 5},
-        "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 5}, "tr3": {"cap": 5}, "tr4": {"cap": 3}}},
+    # # ---------------- case 2 : Factory 3, JT 3, Truck 3 ----------------
+    # {
+    #     "params": {"final_product": ["JT14"], "amount": [1], "float_unit": [],
+    #                "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
+    #     "boms": {
+    #         "JT14": {"JT3": 1, "JT12": 2}},
+    #     "factories": {
+    #         "Fc1": {
+    #             "JT12": {"lots": [1], "time": 1}},
+    #         "Fc2": {
+    #             "JT3": {"lots": [1], "time": 2}},
+    #         "Fc3": {
+    #             "JT3": {"lots": [1], "time": 2},
+    #             "JT14": {"lots": [1], "time": 2}}},
+    #     "holding_cost": {"JT3": 1, "JT12": 2, "JT14": 4},
+    #     "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 8}, "tr3": {"cap": 5}}},
+    # # ---------------- case 3 : Factory 3, JT 3, Truck 2 ----------------
+    # {
+    #     "params": {"final_product": ["JT15"], "amount": [1], "float_unit": [],
+    #                "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
+    #     "boms": {
+    #         "JT15": {"JT8": 2, "JT11": 2}},
+    #     "factories": {
+    #         "Fc1": {
+    #             "JT8": {"lots": [1], "time": 2}},
+    #         "Fc2": {
+    #             "JT15": {"lots": [1], "time": 3}},
+    #         "Fc3": {
+    #             "JT11": {"lots": [1], "time": 1}}},
+    #     "holding_cost": {"JT8": 2, "JT11": 1, "JT15": 4},
+    #     "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 10}}},
+    # # ---------------- case 4 : Factory 3, JT 4, Truck 2 ----------------
+    # {
+    #     "params": {"final_product": ["JT14"], "amount": [1], "float_unit": ["JT14"],
+    #                "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
+    #     "boms": {
+    #         "JT11": {"JT9": 1},
+    #         "JT14": {"JT3": 2, "JT11": 1}},
+    #     "factories": {
+    #         "Fc1": {
+    #             "JT3": {"lots": [1], "time": 2}},
+    #         "Fc2": {
+    #             "JT11": {"lots": [1, 3], "time": 3}},
+    #         "Fc3": {
+    #             "JT9": {"lots": [1], "time": 2},
+    #             "JT14": {"lots": [1], "time": 3}}},
+    #     "holding_cost": {"JT3": 2, "JT9": 2, "JT11": 2, "JT14": 5},
+    #     "trucks": {"tr1": {"cap": 8}, "tr2": {"cap": 5}}},
+    # # ---------------- case 5 : Factory 4, JT 4, Truck 3 ----------------
+    # {
+    #     "params": {"final_product": ["JT12"], "amount": [1], "float_unit": ["JT12"],
+    #                "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
+    #     "boms": {
+    #         "JT10": {"JT2": 1, "JT8": 1},
+    #         "JT12": {"JT8": 2, "JT10": 1}},
+    #     "factories": {
+    #         "Fc1": {
+    #             "JT2": {"lots": [1], "time": 2}},
+    #         "Fc2": {
+    #             "JT8": {"lots": [1], "time": 2}},
+    #         "Fc3": {
+    #             "JT10": {"lots": [1], "time": 2}},
+    #         "Fc4": {
+    #             "JT12": {"lots": [1], "time": 4}}},
+    #     "holding_cost": {"JT2": 1, "JT8": 2, "JT10": 6, "JT12": 11},
+    #     "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 10}, "tr3": {"cap": 8}}},
+    # # ---------------- case 6 : Factory 4, JT 4, Truck 4 ----------------
+    # {
+    #     "params": {"final_product": ["JT10"], "amount": [1], "float_unit": ["JT5"],
+    #                "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
+    #     "boms": {
+    #         "JT6": {"JT4": 1},
+    #         "JT10": {"JT5": 1, "JT6": 2}},
+    #     "factories": {
+    #         "Fc1": {
+    #             "JT4": {"lots": [1], "time": 1}},
+    #         "Fc2": {
+    #             "JT10": {"lots": [1], "time": 3}},
+    #         "Fc3": {
+    #             "JT5": {"lots": [1], "time": 2}},
+    #         "Fc4": {
+    #             "JT6": {"lots": [1, 2], "time": 2}}},
+    #     "holding_cost": {"JT4": 2, "JT5": 1, "JT6": 3, "JT10": 4},
+    #     "trucks": {"tr1": {"cap": 8}, "tr2": {"cap": 8}, "tr3": {"cap": 8}, "tr4": {"cap": 3}}},
+    # # ---------------- case 7 : Factory 4, JT 4, Truck 4 ----------------
+    # {
+    #     "params": {"final_product": ["JT15"], "amount": [1], "float_unit": ["JT3"],
+    #                "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
+    #     "boms": {
+    #         "JT8": {"JT2": 2, "JT3": 2},
+    #         "JT15": {"JT3": 1, "JT8": 1}},
+    #     "factories": {
+    #         "Fc1": {
+    #             "JT3": {"lots": [1], "time": 2}},
+    #         "Fc2": {
+    #             "JT8": {"lots": [1], "time": 2}},
+    #         "Fc3": {
+    #             "JT15": {"lots": [1], "time": 4}},
+    #         "Fc4": {
+    #             "JT2": {"lots": [1, 3], "time": 2}}},
+    #     "holding_cost": {"JT2": 1, "JT3": 1, "JT8": 3, "JT15": 4},
+    #     "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 8}, "tr3": {"cap": 5}, "tr4": {"cap": 3}}},
+    # # ---------------- case 8 : Factory 4, JT 5, Truck 4 ----------------
+    # {
+    #     "params": {"final_product": ["JT7", "JT10"], "amount": [1, 1], "float_unit": [],
+    #                "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
+    #     "boms": {
+    #         "JT5": {"JT3": 1},
+    #         "JT7": {"JT2": 1},
+    #         "JT10": {"JT3": 2, "JT5": 1}},
+    #     "factories": {
+    #         "Fc1": {
+    #             "JT10": {"lots": [1], "time": 4}},
+    #         "Fc2": {
+    #             "JT5": {"lots": [1], "time": 2}},
+    #         "Fc3": {
+    #             "JT3": {"lots": [1], "time": 1}},
+    #         "Fc4": {
+    #             "JT2": {"lots": [1], "time": 2},
+    #             "JT7": {"lots": [1], "time": 3}}},
+    #     "holding_cost": {"JT2": 1, "JT3": 1, "JT5": 2, "JT7": 2, "JT10": 5},
+    #     "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 8}, "tr3": {"cap": 5}, "tr4": {"cap": 3}}},
+    # # ---------------- case 9 : Factory 4, JT 5, Truck 4 ----------------
+    # {
+    #     "params": {"final_product": ["JT14", "JT15"], "amount": [1, 1], "float_unit": [],
+    #                "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
+    #     "boms": {
+    #         "JT8": {"JT2": 1, "JT3": 1},
+    #         "JT14": {"JT2": 2, "JT3": 2, "JT8": 1},
+    #         "JT15": {"JT8": 1}},
+    #     "factories": {
+    #         "Fc1": {
+    #             "JT2": {"lots": [1, 2], "time": 2},
+    #             "JT14": {"lots": [1], "time": 4},
+    #             "JT15": {"lots": [1], "time": 4}},
+    #         "Fc2": {
+    #             "JT8": {"lots": [1], "time": 3},
+    #             "JT15": {"lots": [1], "time": 3}},
+    #         "Fc3": {
+    #             "JT2": {"lots": [1], "time": 1}},
+    #         "Fc4": {
+    #             "JT3": {"lots": [1], "time": 1},
+    #             "JT15": {"lots": [1], "time": 4}}},
+    #     "holding_cost": {"JT2": 2, "JT3": 1, "JT8": 6, "JT14": 11, "JT15": 9},
+    #     "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 8}, "tr3": {"cap": 5}, "tr4": {"cap": 5}}},
+    # # ---------------- case 10 : Factory 4, JT 5, Truck 4 ----------------
+    # {
+    #     "params": {"final_product": ["JT8", "JT13"], "amount": [2, 2], "float_unit": [],
+    #                "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}},
+    #     "boms": {
+    #         "JT7": {"JT5": 1},
+    #         "JT8": {"JT3": 1, "JT7": 1},
+    #         "JT13": {"JT5": 2, "JT7": 1}},
+    #     "factories": {
+    #         "Fc1": {
+    #             "JT5": {"lots": [1], "time": 1},
+    #             "JT8": {"lots": [1], "time": 3}},
+    #         "Fc2": {
+    #             "JT3": {"lots": [1], "time": 2}},
+    #         "Fc3": {
+    #             "JT13": {"lots": [1], "time": 4}},
+    #         "Fc4": {
+    #             "JT5": {"lots": [1, 2], "time": 1},
+    #             "JT7": {"lots": [1], "time": 3}}},
+    #     "holding_cost": {"JT3": 2, "JT5": 2, "JT7": 3, "JT8": 7, "JT13": 5},
+    #     "trucks": {"tr1": {"cap": 10}, "tr2": {"cap": 5}, "tr3": {"cap": 5}, "tr4": {"cap": 3}}},
     # ---------------- case 11 : Factory 4, JT 5, Truck 4 ----------------
     # {
     #     "params": {"final_product": ["JT10", "JT13"], "amount": [2, 1], "float_unit": ["JT2"],
