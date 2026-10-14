@@ -132,6 +132,10 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, printing, s
         if solved(*stages[stage], horizon): stage += 1
         else: horizon += 1
 
+    for list, name in zip((cp_times, lp_times, cp_various_trucks_times, lp_various_trucks_times), ("       cp", "       lp", "cp_var_tr", "lp_var_tr")):
+        print(f"\t{name} : {sum(list) / repetition} / {list}")
+    print()
+
     return [sum(times) / repetition for times in (lp_times, cp_times, lp_various_trucks_times, cp_various_trucks_times)]
 
 def main():
@@ -162,6 +166,7 @@ def main():
     for idx, system in enumerate(("lp", "cp", "lp_various_trucks", "cp_various_trucks")):
         plt.plot(x, [graph[key][idx] for key in x], label=system, marker="o", linestyle="--")
     plt.legend()
+    plt.xticks(rotation=45, fontsize=5)
     plt.xlabel("dataset")
     plt.ylabel("time")
     plt.show()
