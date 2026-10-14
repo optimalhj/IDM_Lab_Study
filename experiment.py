@@ -141,7 +141,6 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, printing, s
 def main():
 
     from experiment_dataset import repetition, datasets
-    random.seed(4233)
     printing, saving = False, True
     gantt_dir = "reuslts_gantt_charts"
     if saving: os.makedirs(gantt_dir, exist_ok=True)
@@ -151,7 +150,8 @@ def main():
     for dataset in datasets:
         params, boms, factories, holding_cost, trucks = dataset["params"], dataset["boms"], dataset["factories"], dataset["holding_cost"], dataset["trucks"]
         key = f"fc{len(factories)}_tr{len(trucks)}_jt{len(set([jt for fc in factories.keys() for jt in factories[fc]]))}_fp{len(params["final_product"])}({",".join(str(value) for value in params["amount"])})_b{len(boms)}_"
-
+        
+        random.seed(4233)
         fcs = list(factories)
         deliveries = {fc1: {fc2: random.randint(3, 8) if fc1 != fc2 else 1 for fc2 in fcs} for fc1 in fcs}
 
