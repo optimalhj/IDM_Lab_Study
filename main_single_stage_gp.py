@@ -6,7 +6,7 @@ import gurobipy as gp
 from gurobipy import GRB
 import time
 
-def system(process, deliver, boms, holding_cost, ini_set, params, horizon, printing=True):
+def system(process, deliver, boms, holding_cost, ini_set, params, horizon, printing=True): # 반환 : (계산 시간, 결과 dict), printing : 결과 출력 / 그래프 여부
     need = {}
     def explode(jt, qty):
         need[jt] = need.get(jt, 0) + qty
@@ -169,9 +169,67 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon, print
 
     if md.Status == GRB.OPTIMAL:
         calculating_time = time.time() - st_time
+        def val(x): # Var / LinExpr 의 해 (정수값이면 int 로)
+            v = x.getValue() if isinstance(x, gp.LinExpr) else x.X
+            return round(v) if abs(v - round(v)) < 1e-6 else v
+        total_makespan = round(total_makespan.X)
+
+        jobs = [(fc, jt, k, round(sem[fc][jt][k][0].X), round(sem[fc][jt][k][1].X)) for fc in sem.keys() for jt in sem[fc].keys() for k in range(max_job[fc][jt]) if round(sem[fc][jt][k][2].X)]
+
+        trucks = [{"home": f, "loc": f, "free": -1, "moves": []} for f in fcs for _ in range(round(truck_idle[f][-1].X))]
+        departures = sorted((t, f, g, round(truck_move[(f, g)][t].X)) for f, g in arcs for t in range(horizon) if round(truck_move[(f, g)][t].X))
+        for t, f, g, num in departures:
+            leg = sorted(((key, n) for key in commodities if (f, g) in cargo[key] and (n := round(cargo[key][(f, g)][t].X))), key=lambda lots: -lots[0][3])
+            loads, room = [{} for _ in range(num)], [truck_cap] * num # 같은 arc 에 여러 대가 출발하면 lot 을 통째로 남은 용량이 있는 트럭에 싣기
+            for (o, d, jt, lot_unit), n in leg:
+                for _ in range(n):
+                    i = next((i for i in range(num) if room[i] >= lot_unit), max(range(num), key=lambda i: room[i]))
+                    loads[i].setdefault((d, jt), []).append(lot_unit) # load[(d, jt)] : 실린 lot 크기 목록
+                    room[i] -= lot_unit
+            ready = [truck for truck in trucks if truck["loc"] == f and truck["free"] <= t]
+            ready.sort(key=lambda truck: -sum(sum(lots) for (d, _), lots in (truck["moves"][-1][4] if truck["moves"] else {}).items() if d != f)) # 경유 화물을 싣고 온 트럭이 이어서 출발
+            assert len(ready) >= num, f"truck flow broken at {f} t={t}"
+            for truck, load in zip(ready[:num], loads):
+                arrive = t + getattr(deliver, f"{f}{g}")
+                truck["moves"].append((f, g, t, arrive, load))
+                truck["loc"], truck["free"] = g, arrive
+
+        virtual_moves = [] # Virtual Truck : 같은 공장 생산품이 상위 job 에 투입된 시점 (내부 이송, 시간 0)
+        for f in ini_set.keys():
+            for t in range(horizon):
+                if load := {ing: amount for ing in ini_set[f] if (amount := round(sum(consumed[f][jt][ing][t].X for jt in consumed[f] if ing in consumed[f][jt])))}:
+                    virtual_moves.append((f, t, load))
+        virtual_moves.sort(key=lambda move: move[1])
+
+        # 반환용 결과 (printing 과 별개) : 시간대별 공장 물품 흐름 / 재공품, 트럭 움직임 (적재 물품 포함)
+        factory_log = [{"t": t, "fc": fc, "jt": jt, "wip": val(fc_wip_t[fc][jt][t]), # t 종료 시점 재공품 수량
+                        "produced": val(produced[fc][jt][t]) if jt in produced[fc] else 0, # 생산 완료
+                        "consumed": sum(val(consumed[fc][p][jt][t]) for p in consumed[fc] if jt in consumed[fc][p]), # 같은 공장 상위 job 에 투입
+                        "sent": sum(val(delivering[fc][fp][jt][t][lot_unit]) * lot_unit for fp in delivering.get(fc, {}) if jt in delivering[fc][fp] for lot_unit in ini_set[fc][jt]), # 트럭에 실어 내보냄
+                        "received": sum(val(cargo[key][(e, fc)][t - getattr(deliver, f"{e}{fc}")]) * key[3] for key in commodities if key[1:3] == (fc, jt) for e in fcs if (e, fc) in cargo[key] and t - getattr(deliver, f"{e}{fc}") >= 0)} # 트럭으로 도착
+                       for t in range(horizon) for fc in fc_wip_t for jt in fc_wip_t[fc]]
+        transit_log = [{"t": t, "jt": jt,
+                        "moving": sum(val(cargo[key][(f, g)][s]) * key[3] for key in commodities if key[2] == jt for f, g in cargo[key] for s in range(max(0, t - getattr(deliver, f"{f}{g}") + 1), t + 1)), # 트럭에 실려 이동 중
+                        "waiting": sum(val(waiting[key][f][t]) * key[3] for key in commodities if key[2] == jt for f in waiting[key])} # 경유 공장에서 다음 트럭 대기
+                       for t in range(horizon) for jt in ship_max]
+        cargo_of = lambda load: [{"to": d, "jt": jt, "qty": sum(lots), "lots": lots} for (d, jt), lots in load.items()]
+        truck_routes = [{"name": f"tr{i + 1}", "home": truck["home"], "moves": [{"from": f, "to": g, "depart": t, "arrive": arrive, "load": cargo_of(load)} for f, g, t, arrive, load in truck["moves"]]} for i, truck in enumerate(trucks)]
+        truck_log = [] # 시점별 트럭 상태 (moving : from -> to 이동 중, idle : from (= to) 에 정차)
+        for route in truck_routes:
+            for t in range(horizon):
+                if move := next((move for move in route["moves"] if move["depart"] <= t < move["arrive"]), None):
+                    truck_log.append({"t": t, "truck": route["name"], "state": "moving", "from": move["from"], "to": move["to"], "load": move["load"]})
+                else:
+                    at = ([move["to"] for move in route["moves"] if move["arrive"] <= t] or [route["home"]])[-1]
+                    truck_log.append({"t": t, "truck": route["name"], "state": "idle", "from": at, "to": at, "load": []})
+        result = {"status": md.Status, "horizon": horizon, "calculating_time": calculating_time,
+                  "makespan": total_makespan, "holding_cost": val(total_holding), "truck_used": val(truck_used), "truck_travel": val(truck_travel),
+                  "jobs": [{"fc": fc, "jt": jt, "k": k, "start": st, "end": ed} for fc, jt, k, st, ed in jobs],
+                  "factory": factory_log, "in_transit": transit_log, "trucks": truck_routes, "truck_log": truck_log,
+                  "virtual_moves": [{"fc": f, "t": t, "load": load} for f, t, load in virtual_moves]}
+
         if printing:
             print("Calculated time =", calculating_time)
-            total_makespan = round(total_makespan.X)
             print("Status :", md.Status, f"(horizon = {horizon})")
             print("Total Makespan :", total_makespan)
             print("Holding Cost :", total_holding.X)
@@ -180,43 +238,17 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon, print
                     if cost := holding[fc][wip].getValue():
                         print(f"    {fc} {wip} : {cost} (= {holding_cost.get(wip, 0)} x {sum(v.X for v in held[fc][wip].values())} unit*time)")
             print("Truck Used :", truck_used.X, "/", tps, "(+1 Virtual Truck)")
-            print("Truck Travel :", truck_travel.X, "\n")
-
-            jobs = [(fc, jt, k, round(sem[fc][jt][k][0].X), round(sem[fc][jt][k][1].X)) for fc in sem.keys() for jt in sem[fc].keys() for k in range(max_job[fc][jt]) if round(sem[fc][jt][k][2].X)]
-
-            trucks = [{"home": f, "loc": f, "free": -1, "moves": []} for f in fcs for _ in range(round(truck_idle[f][-1].X))]
-            departures = sorted((t, f, g, round(truck_move[(f, g)][t].X)) for f, g in arcs for t in range(horizon) if round(truck_move[(f, g)][t].X))
-            for t, f, g, num in departures:
-                leg = sorted(((key, n) for key in commodities if (f, g) in cargo[key] and (n := round(cargo[key][(f, g)][t].X))), key=lambda lots: -lots[0][3])
-                loads, room = [{} for _ in range(num)], [truck_cap] * num # 같은 arc 에 여러 대가 출발하면 lot 을 통째로 남은 용량이 있는 트럭에 싣기
-                for (o, d, jt, lot_unit), n in leg:
-                    for _ in range(n):
-                        i = next((i for i in range(num) if room[i] >= lot_unit), max(range(num), key=lambda i: room[i]))
-                        loads[i].setdefault((d, jt), []).append(lot_unit) # load[(d, jt)] : 실린 lot 크기 목록
-                        room[i] -= lot_unit
-                ready = [truck for truck in trucks if truck["loc"] == f and truck["free"] <= t]
-                ready.sort(key=lambda truck: -sum(sum(lots) for (d, _), lots in (truck["moves"][-1][4] if truck["moves"] else {}).items() if d != f)) # 경유 화물을 싣고 온 트럭이 이어서 출발
-                assert len(ready) >= num, f"truck flow broken at {f} t={t}"
-                for truck, load in zip(ready[:num], loads):
-                    arrive = t + getattr(deliver, f"{f}{g}")
-                    truck["moves"].append((f, g, t, arrive, load))
-                    truck["loc"], truck["free"] = g, arrive
+            print("Truck Travel :", truck_travel.X)
 
             fmt = lambda load: ", ".join(f"{jt}×{sum(lots):g}→{d} [{'+'.join(f'{lot:g}' for lot in lots)}]" for (d, jt), lots in load.items()) or "empty" # [ ] : lot 구성
             for i, truck in enumerate(trucks):
-                print(f"tr{i + 1} (start {truck['home']}) : {' → '.join([truck['home']] + [move[1] for move in truck['moves']])}")
+                print(f"    tr{i + 1} (start {truck['home']}) : {' → '.join([truck['home']] + [move[1] for move in truck['moves']])}")
                 for f, g, t, arrive, load in truck["moves"]:
-                    print(f"    {f} -> {g} | {t} ~ {arrive} ({arrive - t}) | {fmt(load)}")
+                    print(f"        {f} -> {g} | {t} ~ {arrive} ({arrive - t}) | {fmt(load)}")
 
-            virtual_moves = [] # Virtual Truck : 같은 공장 생산품이 상위 job 에 투입된 시점 (내부 이송, 시간 0)
-            for f in ini_set.keys():
-                for t in range(horizon):
-                    if load := {ing: amount for ing in ini_set[f] if (amount := round(sum(consumed[f][jt][ing][t].X for jt in consumed[f] if ing in consumed[f][jt])))}:
-                        virtual_moves.append((f, t, load))
-            virtual_moves.sort(key=lambda move: move[1])
-            print("vt (Virtual Truck)")
+            print("    vt (Virtual Truck)")
             for f, t, load in virtual_moves:
-                print(f"    {f} -> {f} | {t} | {load}")
+                print(f"        {f} -> {f} | {t} | {load}")
 
             palette = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
             INK, MUTED, GRID, BAND, EMPTY, VIRTUAL = "#1f2328", "#6b7280", "#e5e7eb", "#f3f4f6", "#9ca3af", "#7c3aed"
@@ -287,10 +319,10 @@ def system(process, deliver, boms, holding_cost, ini_set, params, horizon, print
             fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.83, 0.95), frameon=False, fontsize=8)
             fig.tight_layout(rect=(0, 0, 0.83, 1))
             plt.show()
-        return calculating_time
+        return calculating_time, result
     else:
         if printing: print("X")
-        return 0
+        return 0, None
 
 def set_horizon(boms, factories, deliveries, params):
 
@@ -334,7 +366,7 @@ def start(boms, factories, holding_cost, deliveries, params):
     for fc1 in deliveries.keys():
         for fc2 in deliveries[fc1].keys():
             setattr(deliver, f"{fc1}{fc2}", deliveries[fc1][fc2])
-    system(process, deliver, boms, holding_cost, ini_set, params, set_horizon(boms, factories, deliveries, params))
+    return system(process, deliver, boms, holding_cost, ini_set, params, set_horizon(boms, factories, deliveries, params)) # (계산 시간, 결과 dict)
 
 def main():
 

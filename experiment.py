@@ -2,6 +2,8 @@ import main_single_stage_cp, main_single_stage_gp, main_single_stage_cp_various_
 import random
 from copy import deepcopy
 import matplotlib.pyplot as plt
+import mysql.connector
+from private import *
 
 def lower_bound(boms, factories, deliveries, params):
     # 어떤 실행 가능해도 이보다 빨리 끝날 수 없는 makespan 하한 (트럭 / lot / 재료 경합을 무시한 완화)
@@ -44,11 +46,34 @@ def lower_bound(boms, factories, deliveries, params):
     for jt in producers: need(jt)
     return max(avail(jt, req[jt]) for jt in producers if req[jt]) # 모든 job 종료 <= makespan
 
+def mysql_initialize():
+    conn = mysql.connector.connect(user=user, password=password)
+    cursor = conn.cursor()
+    cursor.execute(f"DROP DATABASE IF EXISTS {db_name};")
+    cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name};")
+    cursor.execute(f"""
+        CREATE TABLE {table_time_record}(
+        DATASET varchar(30) NOT NULL PRIMARY KEY);
+        TIME float""")
+    cursor.close()
+
+def mysql_record(key, calculating_time):
+    conn = mysql.connector.connect(user=user, password=password, database=db_name)
+    cursor = conn.cursor()
+
+    cursor.execute(f"""
+        INSERT INTO {table_time_record} VALUES (\"{key}\", {calculating_time});""")
+
+    cursor.execute(f"""
+        CREATE TABLE {key}(
+        DATASET varchar(30) NOT NULL PRIMARY KEY);
+        TIME float""")
+
 class Process:
     def __init__(self): pass
 class Deliver:
     def __init__(self): pass
-def start(boms, factories, holding_cost, deliveries, trucks, params, repetition=1):
+def start(boms, factories, holding_cost, deliveries, trucks, params, printing, repetition=1):
     process, deliver, ini_set = Process(), Deliver(), {}
     for fc in factories.keys():
         ini_set[fc] = {}
@@ -70,7 +95,7 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, repetition=
             if idx == 1: params_tmp.pop("float_unit")
 
             for _ in range(repetition):
-                calculating_time = system(process, deliver, boms, holding_cost, ini_set, *extra_args, params_tmp, horizon, printing=False)
+                calculating_time, info = system(process, deliver, boms, holding_cost, ini_set, *extra_args, params_tmp, horizon, printing=printing)
                 if not calculating_time: return False
                 times_list.append(calculating_time)
         return True
@@ -86,6 +111,7 @@ def main():
 
     from experiment_dataset import repetition, datasets
     random.seed(4233)
+    printing = False
 
     graph = {}
     for dataset in datasets:
@@ -95,13 +121,15 @@ def main():
         fcs = list(factories)
         deliveries = {fc1: {fc2: random.randint(3, 8) if fc1 != fc2 else 1 for fc2 in fcs} for fc1 in fcs}
 
-        result, i = start(boms, factories, holding_cost, deliveries, trucks, params, repetition), 1
+        result, i = start(boms, factories, holding_cost, deliveries, trucks, params, printing, repetition), 1
         while True:
             key_tmp = key + str(i)
             if key_tmp not in graph:
+                print(key_tmp)
                 graph[key_tmp] = result
                 break
             i += 1
+        print()
 
     x = list(graph)
     for idx, system in enumerate(("lp", "cp", "lp_various_trucks", "cp_various_trucks")):

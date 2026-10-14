@@ -68,7 +68,7 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, comparison_
             if idx == 1: params_tmp.pop("float_unit")
 
             params_tmp["tps"] = len(trucks)
-            calculating_time = system(process, deliver, boms, holding_cost, ini_set, params_tmp, horizon)
+            calculating_time, result = system(process, deliver, boms, holding_cost, ini_set, params_tmp, horizon)
 
             if not calculating_time: break
             times_list.append(calculating_time)
@@ -81,7 +81,7 @@ def start(boms, factories, holding_cost, deliveries, trucks, params, comparison_
             params_tmp = deepcopy(params)
             if idx == 1: params_tmp.pop("float_unit")
 
-            calculating_time = system(process, deliver, boms, holding_cost, ini_set, trucks, params_tmp, horizon)
+            calculating_time, result = system(process, deliver, boms, holding_cost, ini_set, trucks, params_tmp, horizon)
 
             if not calculating_time: break
             times_list.append(calculating_time)

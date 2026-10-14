@@ -5,7 +5,7 @@ from matplotlib.lines import Line2D
 from ortools.sat.python import cp_model
 import time
 
-def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizon, printing=True):
+def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizon, printing=True): # 반환 : (계산 시간, 결과 dict), printing : 결과 출력 / 그래프 여부
     need = {}
     def explode(jt, qty):
         need[jt] = need.get(jt, 0) + qty
@@ -188,49 +188,79 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         calculating_time = time.time() - st_time
+        val = solver.value
+        total_makespan = val(total_makespan)
+
+        jobs = [(fc, jt, k, val(sem[fc][jt][k][0]), val(sem[fc][jt][k][1])) for fc in sem.keys() for jt in sem[fc].keys() for k in range(max_job[fc][jt]) if val(sem[fc][jt][k][2])]
+
+        routes = [] # 사용된 트럭의 경로 : 트럭별 변수에서 그대로 읽음 (moves : (f, g, 출발, 도착, load))
+        for v in trucks:
+            if not val(truck_used[v]):
+                continue
+            moves = []
+            for t, f, g in sorted((t, f, g) for f, g in arcs for t in range(horizon) if val(truck_move[v][(f, g)][t])):
+                load = {} # load[(d, jt)] : 실린 lot 크기 목록
+                for key in sorted(commodities, key=lambda key: -key[3]):
+                    if (f, g) in cargo[key] and (n := val(loaded[key][v][(f, g)][t])):
+                        load.setdefault((key[1], key[2]), []).extend([key[3]] * n)
+                moves.append((f, g, t, t + getattr(deliver, f"{f}{g}"), load))
+            routes.append({"name": v, "cap": trucks[v]["cap"], "home": next(f for f in fcs if val(truck_idle[v][f][-1])), "moves": moves})
+
+        virtual_moves = [] # Virtual Truck : 같은 공장 생산품이 상위 job 에 투입된 시점 (내부 이송, 시간 0)
+        for f in ini_set.keys():
+            for t in range(horizon):
+                if load := {ing: amount for ing in ini_set[f] if (amount := sum(val(consumed[f][jt][ing][t]) for jt in consumed[f] if ing in consumed[f][jt]))}:
+                    virtual_moves.append((f, t, load))
+        virtual_moves.sort(key=lambda move: move[1])
+
+        # 반환용 결과 (printing 과 별개) : 시간대별 공장 물품 흐름 / 재공품, 트럭 움직임 (적재 물품 포함)
+        factory_log = [{"t": t, "fc": fc, "jt": jt, "wip": val(fc_wip_t[fc][jt][t]), # t 종료 시점 재공품 수량
+                        "produced": val(produced[fc][jt][t]) if jt in produced[fc] else 0, # 생산 완료
+                        "consumed": sum(val(consumed[fc][p][jt][t]) for p in consumed[fc] if jt in consumed[fc][p]), # 같은 공장 상위 job 에 투입
+                        "sent": sum(val(delivering[fc][fp][jt][t][lot_unit]) * lot_unit for fp in delivering.get(fc, {}) if jt in delivering[fc][fp] for lot_unit in ini_set[fc][jt]), # 트럭에 실어 내보냄
+                        "received": sum(val(cargo[key][(e, fc)][t - getattr(deliver, f"{e}{fc}")]) * key[3] for key in commodities if key[1:3] == (fc, jt) for e in fcs if (e, fc) in cargo[key] and t - getattr(deliver, f"{e}{fc}") >= 0)} # 트럭으로 도착
+                       for t in range(horizon) for fc in fc_wip_t for jt in fc_wip_t[fc]]
+        transit_log = [{"t": t, "jt": jt,
+                        "moving": sum(val(cargo[key][(f, g)][s]) * key[3] for key in commodities if key[2] == jt for f, g in cargo[key] for s in range(max(0, t - getattr(deliver, f"{f}{g}") + 1), t + 1)), # 트럭에 실려 이동 중
+                        "waiting": sum(val(waiting[key][f][t]) * key[3] for key in commodities if key[2] == jt for f in waiting[key])} # 경유 공장에서 다음 트럭 대기
+                       for t in range(horizon) for jt in ship_max]
+        cargo_of = lambda load: [{"to": d, "jt": jt, "qty": sum(lots), "lots": lots} for (d, jt), lots in load.items()]
+        truck_routes = [{**route, "moves": [{"from": f, "to": g, "depart": t, "arrive": arrive, "load": cargo_of(load)} for f, g, t, arrive, load in route["moves"]]} for route in routes]
+        truck_log = [] # 시점별 트럭 상태 (moving : from -> to 이동 중, idle : from (= to) 에 정차)
+        for route in truck_routes:
+            for t in range(horizon):
+                if move := next((move for move in route["moves"] if move["depart"] <= t < move["arrive"]), None):
+                    truck_log.append({"t": t, "truck": route["name"], "state": "moving", "from": move["from"], "to": move["to"], "load": move["load"]})
+                else:
+                    at = ([move["to"] for move in route["moves"] if move["arrive"] <= t] or [route["home"]])[-1]
+                    truck_log.append({"t": t, "truck": route["name"], "state": "idle", "from": at, "to": at, "load": []})
+        result = {"status": solver.status_name(status), "horizon": horizon, "calculating_time": calculating_time,
+                  "makespan": total_makespan, "holding_cost": val(total_holding), "truck_used": sum(val(u) for u in truck_used.values()), "truck_travel": val(truck_travel),
+                  "jobs": [{"fc": fc, "jt": jt, "k": k, "start": st, "end": ed} for fc, jt, k, st, ed in jobs],
+                  "factory": factory_log, "in_transit": transit_log, "trucks": truck_routes, "truck_log": truck_log,
+                  "virtual_moves": [{"fc": f, "t": t, "load": load} for f, t, load in virtual_moves]}
+
         if printing:
             print("Calculated time =", calculating_time)
-            total_makespan = solver.value(total_makespan)
             print("Status :", solver.status_name(status), f"(horizon = {horizon})")
             print("Total Makespan :", total_makespan)
-            print("Holding Cost :", solver.value(total_holding))
+            print("Holding Cost :", val(total_holding))
             for fc in holding.keys():
                 for wip in holding[fc].keys():
-                    if cost := solver.value(holding[fc][wip]):
-                        print(f"    {fc} {wip} : {cost} (= {holding_cost.get(wip, 0)} x {sum(solver.value(v) for v in held[fc][wip].values())} unit*time)")
-            print("Truck Used :", sum(solver.value(u) for u in truck_used.values()), "/", tps, "(+1 Virtual Truck)")
-            print("Truck Travel :", solver.value(truck_travel), "\n")
-
-            jobs = [(fc, jt, k, solver.value(sem[fc][jt][k][0]), solver.value(sem[fc][jt][k][1])) for fc in sem.keys() for jt in sem[fc].keys() for k in range(max_job[fc][jt]) if solver.value(sem[fc][jt][k][2])]
-
-            routes = [] # 사용된 트럭의 경로 : 트럭별 변수에서 그대로 읽음 (moves : (f, g, 출발, 도착, load))
-            for v in trucks:
-                if not solver.value(truck_used[v]):
-                    continue
-                moves = []
-                for t, f, g in sorted((t, f, g) for f, g in arcs for t in range(horizon) if solver.value(truck_move[v][(f, g)][t])):
-                    load = {} # load[(d, jt)] : 실린 lot 크기 목록
-                    for key in sorted(commodities, key=lambda key: -key[3]):
-                        if (f, g) in cargo[key] and (n := solver.value(loaded[key][v][(f, g)][t])):
-                            load.setdefault((key[1], key[2]), []).extend([key[3]] * n)
-                    moves.append((f, g, t, t + getattr(deliver, f"{f}{g}"), load))
-                routes.append({"name": v, "cap": trucks[v]["cap"], "home": next(f for f in fcs if solver.value(truck_idle[v][f][-1])), "moves": moves})
+                    if cost := val(holding[fc][wip]):
+                        print(f"    {fc} {wip} : {cost} (= {holding_cost.get(wip, 0)} x {sum(val(v) for v in held[fc][wip].values())} unit*time)")
+            print("Truck Used :", sum(val(u) for u in truck_used.values()), "/", tps, "(+1 Virtual Truck)")
+            print("Truck Travel :", val(truck_travel))
 
             fmt = lambda load: ", ".join(f"{jt}×{sum(lots):g}→{d} [{'+'.join(f'{lot:g}' for lot in lots)}]" for (d, jt), lots in load.items()) or "empty" # [ ] : lot 구성
             for route in routes:
-                print(f"{route['name']} (cap {route['cap']}, start {route['home']}) : {' → '.join([route['home']] + [move[1] for move in route['moves']])}")
+                print(f"    {route['name']} (cap {route['cap']}, start {route['home']}) : {' → '.join([route['home']] + [move[1] for move in route['moves']])}")
                 for f, g, t, arrive, load in route["moves"]:
-                    print(f"    {f} -> {g} | {t} ~ {arrive} ({arrive - t}) | {fmt(load)} | {sum(map(sum, load.values())):g}/{route['cap']}")
+                    print(f"        {f} -> {g} | {t} ~ {arrive} ({arrive - t}) | {fmt(load)} | {sum(map(sum, load.values())):g}/{route['cap']}")
 
-            virtual_moves = [] # Virtual Truck : 같은 공장 생산품이 상위 job 에 투입된 시점 (내부 이송, 시간 0)
-            for f in ini_set.keys():
-                for t in range(horizon):
-                    if load := {ing: amount for ing in ini_set[f] if (amount := sum(solver.value(consumed[f][jt][ing][t]) for jt in consumed[f] if ing in consumed[f][jt]))}:
-                        virtual_moves.append((f, t, load))
-            virtual_moves.sort(key=lambda move: move[1])
-            print("vt (Virtual Truck)")
+            print("    vt (Virtual Truck)")
             for f, t, load in virtual_moves:
-                print(f"    {f} -> {f} | {t} | {load}")
+                print(f"        {f} -> {f} | {t} | {load}")
 
             palette = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
             INK, MUTED, GRID, BAND, EMPTY, VIRTUAL = "#1f2328", "#6b7280", "#e5e7eb", "#f3f4f6", "#9ca3af", "#7c3aed"
@@ -301,10 +331,10 @@ def system(process, deliver, boms, holding_cost, ini_set, trucks, params, horizo
             fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.83, 0.95), frameon=False, fontsize=8)
             fig.tight_layout(rect=(0, 0, 0.83, 1))
             plt.show()
-        return calculating_time
+        return calculating_time, result
     else:
         if printing: print("X")
-        return 0
+        return 0, None
 
 def set_horizon(boms, factories, deliveries, params):
 
@@ -348,11 +378,11 @@ def start(boms, factories, holding_cost, deliveries, trucks, params):
     for fc1 in deliveries.keys():
         for fc2 in deliveries[fc1].keys():
             setattr(deliver, f"{fc1}{fc2}", deliveries[fc1][fc2])
-    system(process, deliver, boms, holding_cost, ini_set, trucks, params, set_horizon(boms, factories, deliveries, params))
+    return system(process, deliver, boms, holding_cost, ini_set, trucks, params, set_horizon(boms, factories, deliveries, params)) # (계산 시간, 결과 dict)
 
 def main():
 
-    params = {"final_product": ["JT12", "JT9"], "amount": [2, 1], "time_limit": None, # time_limit : 초 단위 제한 (None 이면 최적까지)
+    params = {"final_product": ["JT9"], "amount": [1], "time_limit": None, # time_limit : 초 단위 제한 (None 이면 최적까지)
               "weights": {"makespan": 100, "holding": 1, "truck_used": 10, "truck_travel": 1}} # 목적함수 가중치
 
     boms = {
